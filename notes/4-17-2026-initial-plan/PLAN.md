@@ -5,7 +5,7 @@
 >
 > **Repo:** https://github.com/thekevinscott/put-it-out-there
 > **CLI:** `pilot`
-> **npm scope:** `@piot/`
+> **npm scope:** `@pilot/`
 > **Date:** 2026-04-17
 
 ---
@@ -77,11 +77,11 @@ auth, idempotency, retries, version-file edits) consistently.
 │  └─ uses: thekevinscott/put-it-out-there@v0            │
 │       │                                                 │
 │       ▼ (thin TS wrapper; ~100ms cold start)           │
-│     @piot/pilot-core  ◄── reads pilot.toml             │
+│     @pilot/pilot-core  ◄── reads pilot.toml             │
 │       │                                                 │
-│       ├─► @piot/pilot-crates  (Rust → crates.io)       │
-│       ├─► @piot/pilot-pypi    (Python → PyPI)          │
-│       └─► @piot/pilot-npm     (TS/JS → npm)            │
+│       ├─► @pilot/pilot-crates  (Rust → crates.io)       │
+│       ├─► @pilot/pilot-pypi    (Python → PyPI)          │
+│       └─► @pilot/pilot-npm     (TS/JS → npm)            │
 └────────────────────────────────────────────────────────┘
 ```
 
@@ -169,7 +169,7 @@ Explicit list of things pilot does **not** try to do:
 | Term              | Meaning                                                                                       |
 |-------------------|-----------------------------------------------------------------------------------------------|
 | **Package**       | One row in `[[package]]` — a publishable unit (one crate, one wheel-set, one npm package).    |
-| **Plugin**        | An npm module implementing the plugin interface for one registry (`@piot/pilot-crates`, etc).  |
+| **Plugin**        | An npm module implementing the plugin interface for one registry (`@pilot/pilot-crates`, etc).  |
 | **Release trailer** | A `release: patch|minor|major` line in the merge commit message body.                         |
 | **Cascade**       | The set of packages whose `paths` globs intersect the changed files since last release.        |
 | **Idempotency check** | Plugin-side check: "is this version already published?" If yes, skip cleanly.             |
@@ -188,7 +188,7 @@ put-it-out-there/                         ← this repo
 ├── src/
 │   ├── action/                           ← thin TS wrapper invoked by GHA
 │   │   └── main.ts                       ← parses inputs, invokes core
-│   ├── core/                             ← @piot/pilot-core
+│   ├── core/                             ← @pilot/pilot-core
 │   │   ├── config.ts                     ← pilot.toml loader + schema
 │   │   ├── cascade.ts                    ← path-filter → package set
 │   │   ├── trailer.ts                    ← parse `release:` from merge commit
@@ -198,12 +198,12 @@ put-it-out-there/                         ← this repo
 │   │   ├── git.ts                        ← git wrapper (tag, log, trailer)
 │   │   ├── state.ts                      ← read last-published tags
 │   │   └── run.ts                        ← top-level orchestration
-│   └── cli/                              ← @piot/pilot
+│   └── cli/                              ← @pilot/pilot
 │       └── bin.ts                        ← yargs/commander entry
 └── plugins/
-    ├── crates/                           ← @piot/pilot-crates
-    ├── pypi/                             ← @piot/pilot-pypi
-    └── npm/                              ← @piot/pilot-npm
+    ├── crates/                           ← @pilot/pilot-crates
+    ├── pypi/                             ← @pilot/pilot-pypi
+    └── npm/                              ← @pilot/pilot-npm
 ```
 
 ### 5.2 Runtime shape
@@ -227,7 +227,7 @@ At runtime:
 4. Core computes the cascade and dispatches to plugins.
 
 For local use, the same `pilot-core` is reachable via the `pilot` CLI which
-users install globally (`npm i -g @piot/pilot`) or via `npx @piot/pilot`. The
+users install globally (`npm i -g @pilot/pilot`) or via `npx @pilot/pilot`. The
 GHA and CLI share identical execution paths — `pilot plan` in CI and locally
 produce the same output.
 
@@ -315,11 +315,11 @@ core).
 
 Examples:
 
-- **`@piot/pilot-crates`**: `crate` (crates.io name if differs), `features`,
+- **`@pilot/pilot-crates`**: `crate` (crates.io name if differs), `features`,
   `target` (publishing target triple list).
-- **`@piot/pilot-pypi`**: `pypi`, `build` (`maturin` \| `setuptools` \| `hatch`),
+- **`@pilot/pilot-pypi`**: `pypi`, `build` (`maturin` \| `setuptools` \| `hatch`),
   `wheels_artifact` (artifact name to download from build matrix).
-- **`@piot/pilot-npm`**: `npm` (package name if differs), `access`
+- **`@pilot/pilot-npm`**: `npm` (package name if differs), `access`
   (`public` \| `restricted`), `tag` (dist-tag, default `latest`).
 
 ---
@@ -327,7 +327,7 @@ Examples:
 ## 7. Plugin Interface
 
 All plugins implement a single default-exported object conforming to this TS
-interface (shipped from `@piot/pilot-core/types`):
+interface (shipped from `@pilot/pilot-core/types`):
 
 ```ts
 export interface PilotPlugin {
@@ -412,15 +412,15 @@ annotate.
 
 Three plugins ship in this repo alongside core:
 
-- **`@piot/pilot-crates`** — `cargo publish` + crates.io HEAD-check for
+- **`@pilot/pilot-crates`** — `cargo publish` + crates.io HEAD-check for
   idempotency. Reads version from Cargo.toml; supports workspace crates via
   `path` pointing at the crate dir.
-- **`@piot/pilot-pypi`** — supports `maturin`, `setuptools`, and `hatch`
+- **`@pilot/pilot-pypi`** — supports `maturin`, `setuptools`, and `hatch`
   build backends. Downloads wheels from GHA artifacts (built by user's
   matrix), publishes via `twine` or `pypa/gh-action-pypi-publish` (delegated
   to a sub-action when OIDC is used). Idempotency via PyPI JSON API
   (`/pypi/{name}/{version}/json` returns 200 if published).
-- **`@piot/pilot-npm`** — `npm publish --provenance` with OIDC; idempotency
+- **`@pilot/pilot-npm`** — `npm publish --provenance` with OIDC; idempotency
   via `npm view <pkg>@<version> version` exit code.
 
 ---
@@ -432,7 +432,7 @@ Three plugins ship in this repo alongside core:
 For a package of kind `X`:
 
 1. **Built-in registry** — if core ships a plugin for kind `X`, use it.
-2. **User's repo node_modules** — `require.resolve(\`@piot/pilot-${X}\`)` from
+2. **User's repo node_modules** — `require.resolve(\`@pilot/pilot-${X}\`)` from
    the repo root.
 3. **Explicit `plugin` field** in the package entry:
    ```toml
@@ -447,7 +447,7 @@ For a package of kind `X`:
 Users install plugins into their repo:
 
 ```bash
-npm i -D @piot/pilot-pypi @piot/pilot-crates @piot/pilot-npm
+npm i -D @pilot/pilot-pypi @pilot/pilot-crates @pilot/pilot-npm
 ```
 
 Or, for zero-config users, the action auto-installs the three built-in
@@ -456,12 +456,12 @@ out with `[pilot] auto_install_plugins = false`.
 
 ### 8.3 Plugin versioning
 
-Each plugin is independently versioned and published to npm under `@piot/*`.
+Each plugin is independently versioned and published to npm under `@pilot/*`.
 Core declares a peer-dep range:
 
 ```json
 "peerDependencies": {
-  "@piot/pilot-core": "^0.x"
+  "@pilot/pilot-core": "^0.x"
 }
 ```
 
@@ -838,5 +838,279 @@ Order within a single package's release:
 3. `publish()` runs.
 4. On success, `git tag <tag_format>` and `git push --tags`.
 5. GitHub Release created via API (§15).
+
+---
+
+## 14. Versioning & Tags
+
+### 14.1 Tag format
+
+`pilot.tag_format` sets the default; each package may override. Two supported
+templates:
+
+- `v{version}` — shared tag (e.g., `v0.3.4`). Works when all packages
+  release in lockstep.
+- `{package}-v{version}` — per-package tag (e.g., `dirsql-python-v0.3.4`).
+  Required when packages can release independently.
+
+Interpolation tokens:
+- `{version}` — semver string (e.g., `0.3.4`).
+- `{package}` — `package.name` from pilot.toml.
+
+### 14.2 Resolving `last_tag`
+
+Given a `tag_format`, convert to a glob pattern for `git tag -l`:
+- `v{version}` → `v*.*.*`
+- `{package}-v{version}` → `<name>-v*.*.*` (with `name` literal)
+
+Take the highest semver-sorted match. Use `git describe --tags --match <glob>`
+fall-back for robustness.
+
+### 14.3 Bump semantics
+
+Given `last_version = 0.3.4` and `release: <bump>`:
+
+| Bump   | Result  |
+|--------|---------|
+| patch  | 0.3.5   |
+| minor  | 0.4.0   |
+| major  | 1.0.0   |
+
+Pre-1.0 follows Cargo/npm convention: `minor` zeros patch, `major` bumps
+major and zeros minor/patch (the "pre-1.0 = breaking minor bumps" variant is
+**not** used; stay strict-semver).
+
+### 14.4 First version
+
+If `last_tag` resolves to nothing for this package, use `package.first_version`
+(default `0.1.0`). The `release: <bump>` trailer is effectively ignored — you
+always get `first_version` on the first release.
+
+### 14.5 Version-file updates
+
+Plugin-owned. Contract:
+- Plugin reads the current version file.
+- If version already equals target, no-op (return `[]`).
+- Otherwise, update in-place and return the path list.
+
+Examples of what each plugin edits:
+
+| Plugin              | File(s)                                                         |
+|---------------------|-----------------------------------------------------------------|
+| `@pilot/pilot-crates`| `Cargo.toml` (`[package] version`), `Cargo.lock` (via `cargo update --workspace`) |
+| `@pilot/pilot-pypi`  | `pyproject.toml` (`[project] version` or tool-specific)          |
+| `@pilot/pilot-npm`   | `package.json` (`version`), `package-lock.json` regenerated      |
+
+### 14.6 The version-bump commit
+
+After plugins write version files, core creates a single commit on `main`
+named `chore(release): bump <pkg1>@<v1>, <pkg2>@<v2>` with a `[skip ci]` tag
+in the body to prevent recursive workflow triggers.
+
+This commit is pushed to `main` **before** the publish step runs. If push
+fails (non-fast-forward — someone else pushed to main during the window),
+the run aborts before publishing.
+
+---
+
+## 15. GitHub Releases
+
+### 15.1 Per-tag release
+
+For each package published, a GitHub Release is created at the package's
+tag with:
+
+- **Title:** `{package_display_name} {version}` (e.g., `dirsql-python 0.3.4`).
+- **Body:** auto-generated from `git log <prev_tag>..<this_tag>` filtered to
+  commits touching files in `package.paths`. Uses the commit subject lines
+  only (no bodies — keeps it short).
+- **Assets:** artifacts from the build step, for manual download.
+- **Prerelease:** set if version is `-rc`, `-beta`, `-alpha` suffixed
+  (not v0 scope, but the flag exists).
+
+### 15.2 Shared release (optional)
+
+When `pilot.tag_format = "v{version}"` (shared tag), a single GH Release is
+created per version spanning all packages. Body groups commits by package.
+
+### 15.3 Release creation API
+
+Uses `actions/github-script` via the core — no external action dependency.
+Handled in the same `publish` job after tags push.
+
+---
+
+## 16. Credentials (OIDC + Tokens)
+
+### 16.1 OIDC trusted publishing (preferred)
+
+- **PyPI:** configure trusted publisher in PyPI project settings pointing at
+  this repo + workflow file. Pilot's PyPI plugin detects OIDC availability
+  (`ACTIONS_ID_TOKEN_REQUEST_TOKEN` env) and uses it. Falls back on token.
+- **npm:** `npm publish --provenance` requires `id-token: write` and no
+  token at all when `NODE_AUTH_TOKEN` is unset but OIDC is configured.
+- **crates.io:** does **not** support OIDC as of 2026-04; always uses
+  `CARGO_REGISTRY_TOKEN`.
+
+### 16.2 Token fallback
+
+When OIDC is unavailable or disabled:
+
+| Registry  | Env var                 | Secret name convention      |
+|-----------|-------------------------|-----------------------------|
+| crates.io | `CARGO_REGISTRY_TOKEN`  | `secrets.CARGO_TOKEN`       |
+| PyPI      | `PYPI_TOKEN`            | `secrets.PYPI_TOKEN`        |
+| npm       | `NODE_AUTH_TOKEN`       | `secrets.NPM_TOKEN`         |
+
+Override via `package.token_env`.
+
+### 16.3 Log safety
+
+All env vars matching `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*KEY*` are
+auto-masked in logs. The core's logger redacts values found in
+`process.env` whose names match these patterns.
+
+---
+
+## 17. CLAUDE.md / AGENTS.md Integration
+
+### 17.1 The problem
+
+For the trailer convention to work, the LLM agent authoring commits has to
+know about it. `pilot init` solves this.
+
+### 17.2 `pilot init`
+
+```
+$ pilot init
+✓ Wrote pilot.toml (scaffold — edit with your packages)
+✓ Wrote pilot/AGENTS.md (trailer convention)
+✓ Appended @pilot/AGENTS.md to CLAUDE.md
+✓ Wrote .github/workflows/release.yml
+✓ Wrote .github/workflows/pilot-check.yml
+```
+
+The `@pilot/AGENTS.md` syntax is a reference to CLAUDE.md's `@-import`
+mechanism: any line starting with `@` is treated by Claude Code as an
+inclusion of that file. The agent reads `pilot/AGENTS.md` transitively.
+
+### 17.3 `pilot/AGENTS.md` contents (generated)
+
+```markdown
+# Release signaling for Put It Out There
+
+When you finish a unit of work and are preparing a PR or commit, add a git
+trailer to the commit message body to signal a release:
+
+    release: <patch|minor|major|skip>
+
+Rules:
+- Omit the trailer for docs-only, CI-only, or internal-only changes.
+- `patch` for bug fixes or internal refactors that don't change public API.
+- `minor` for new features that are backwards-compatible.
+- `major` for breaking changes.
+- `skip` to suppress release when path filters would otherwise cascade.
+
+The trailer on the merge commit determines the release. If merging via
+"Squash and merge," include the trailer in the PR description so it ends up
+in the squashed commit body.
+```
+
+### 17.4 Idempotency of `pilot init`
+
+- If `pilot.toml` exists, print a diff and require `--force` to overwrite.
+- If `CLAUDE.md` already contains `@pilot/AGENTS.md`, skip the append.
+- If `.github/workflows/release.yml` exists, rename to `release.yml.bak`
+  before writing (loud and visible).
+
+### 17.5 Variant for non-Claude agents
+
+`pilot init --agent=cursor` writes to `.cursorrules` instead. v0 supports
+`claude` (default) and `cursor`. Other agents added on request.
+
+---
+
+## 18. Dry-Run as PR Check
+
+### 18.1 Purpose
+
+Surface release errors while the change is still in review, not after merge.
+
+### 18.2 What the check validates
+
+Running `pilot plan --dry-run` in PR mode (where HEAD is the merge-preview
+commit):
+
+1. `pilot.toml` parses and conforms to the schema.
+2. Every `[[package]]` has a resolvable plugin.
+3. Every declared plugin's `validate()` passes.
+4. The PR description or the tip commit has a well-formed `release:` trailer
+   if `require_trailer = true`.
+5. Path-filter cascade produces a non-empty set when the trailer is
+   non-skip, and vice versa.
+6. Computed next version for each cascaded package does not collide with an
+   existing tag.
+7. Plugin-specific pre-publish checks (e.g., crates.io verifies `package.name`
+   is available or owned by the author via `cargo owner --list`).
+
+### 18.3 Exit codes
+
+- `0` — clean. Check passes.
+- `1` — config or plugin error. Fix before merging.
+- `2` — trailer missing or malformed. Add it to the PR.
+- `3` — no cascade despite non-skip trailer. Likely forgot to include paths.
+
+### 18.4 GitHub check output
+
+Writes a job summary (via `$GITHUB_STEP_SUMMARY`) showing:
+
+```
+Packages to release on merge:
+  - dirsql-rust     0.3.4 → 0.3.5  (crates.io)
+  - dirsql-python   0.3.4 → 0.3.5  (pypi)
+Skipped (no matching path changes):
+  - dirsql-cli      (last: 0.3.4)
+```
+
+---
+
+## 19. Rollback Primitive
+
+### 19.1 Scope
+
+Registries do not support true rollback. "Rollback" in pilot means:
+**republish the previous version's code under a new version number.**
+
+### 19.2 Command
+
+```
+pilot rollback --package dirsql-python --to 0.1.45
+```
+
+### 19.3 Behavior
+
+1. `git checkout` the tag for `dirsql-python-v0.1.45` into a temporary
+   worktree.
+2. Compute the next version (`0.1.46` if current is `0.1.45`, or
+   `$current_patch + 1` if the current tag is higher).
+3. Write that version into the plugin's version file.
+4. Build from that worktree (user-provided command, same as normal build).
+5. Publish via the normal plugin path.
+6. Tag and release, with release notes: `Rollback to 0.1.45 code (released
+   as 0.1.46)`.
+
+### 19.4 Why not just re-tag
+
+- crates.io and PyPI won't accept a re-publish of the same version number.
+- npm's 72-hour window allows `npm unpublish` but that breaks consumers
+  who've already pulled the bad version.
+
+Publishing a new patch with the old code is the least-harmful primitive.
+
+### 19.5 Guardrails
+
+- `--to` must be strictly older than the current tag.
+- Requires `--confirm` flag or a `ROLLBACK_CONFIRMED=1` env in CI.
+- Never run automatically from the release workflow — operator-only.
 
 ---
