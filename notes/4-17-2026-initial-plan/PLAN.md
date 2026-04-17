@@ -1114,3 +1114,285 @@ Publishing a new patch with the old code is the least-harmful primitive.
 - Never run automatically from the release workflow — operator-only.
 
 ---
+
+## 20. Post-Release Verifier
+
+### 20.1 Purpose
+
+Catch "it published but it's broken" — a version appears on the registry
+but can't be installed, imported, or initialized.
+
+### 20.2 Mechanism
+
+After a successful publish, each plugin may implement `smokeTest()`. The
+default implementation is shell-in-container:
+
+```
+docker run --rm <base_image> sh -c "
+  <install_cmd>
+  <pkg.smoke>
+"
+```
+
+Where `base_image` and `install_cmd` are plugin-supplied defaults:
+
+| Plugin               | Base image          | Install command                       |
+|----------------------|---------------------|---------------------------------------|
+| `@pilot/pilot-crates`| `rust:slim`          | `cargo install {crate} --version {v}` |
+| `@pilot/pilot-pypi`  | `python:3.12-slim`   | `pip install {pypi}=={v}`             |
+| `@pilot/pilot-npm`   | `node:20-alpine`     | `npm i {name}@{v}`                    |
+
+The user's `package.smoke` runs after install. Examples:
+
+```toml
+[[package]]
+name   = "dirsql-python"
+kind   = "pypi"
+smoke  = "python -c 'import dirsql; dirsql.DirSQL'"
+```
+
+### 20.3 Failure handling
+
+Smoke test failure does **not** unpublish (it usually can't). It:
+- Fails the publish job loudly.
+- Opens a GitHub issue (`pilot: smoke test failed for dirsql-python 0.3.5`)
+  if `pilot.smoke_opens_issue = true`.
+- Suggests `pilot rollback --package dirsql-python --to 0.3.4` in the log.
+
+### 20.4 Timing
+
+Registry CDN propagation is non-zero. The verifier retries the install up
+to 3 times with 10s spacing before declaring failure.
+
+### 20.5 Opt-out
+
+`pilot.smoke_test = false` disables globally. Individual packages can
+disable by omitting `smoke`.
+
+---
+
+## 21. Command Surface (`pilot` CLI)
+
+All commands also runnable via `npx @pilot/pilot <cmd>` if not installed
+globally.
+
+### 21.1 Commands
+
+```
+pilot init                      Scaffold pilot.toml, workflows, AGENTS.md
+pilot plan                      Print release plan for HEAD (dry-run by default)
+pilot plan --dry-run            Explicit dry-run (no side effects)
+pilot plan --json               JSON output for CI
+pilot publish                   Execute the plan (CI-intended)
+pilot rollback --package <p> --to <v>
+                                Republish old version as next patch
+pilot status                    Show last released version per package
+pilot doctor                    Validate config + plugins + auth
+pilot version                   Print CLI version
+```
+
+### 21.2 Global flags
+
+```
+--config <path>      Path to pilot.toml (default: ./pilot.toml)
+--cwd <path>         Working directory (default: cwd)
+--quiet              Warnings and errors only
+--verbose            Debug logs
+--log-format json    Structured logs for CI log ingesters
+```
+
+### 21.3 Exit code convention
+
+| Code | Meaning                                    |
+|------|--------------------------------------------|
+| 0    | Success                                    |
+| 1    | User error (bad config, missing trailer)   |
+| 2    | Plugin error (auth, registry 4xx)          |
+| 3    | Transient error exhausted retries (5xx)    |
+| 4    | Environment error (git unavailable, etc.)  |
+| 10+  | Reserved for future use                    |
+
+---
+
+## 22. State & Logs
+
+### 22.1 State is in git
+
+Pilot stores **no external state**. Everything it needs is either in
+`pilot.toml` or recoverable from:
+
+- `git tag` — for last-published version per package.
+- `git log` — for the release trailer and file changes.
+- Registry API — for publish idempotency.
+
+This makes `pilot` a pure function of the git history and registry state.
+Re-running it always produces the same result for the same input.
+
+### 22.2 Logs
+
+Logs are structured and go to stdout (CI-friendly):
+
+```
+{"ts": "2026-04-17T18:22:04Z", "level": "info", "pkg": "dirsql-python",
+ "phase": "publish", "version": "0.3.5", "msg": "uploaded wheel",
+ "bytes": 124567}
+```
+
+In `--log-format=text` (default for interactive terms), these render as:
+
+```
+→ dirsql-python  0.3.5  publish  uploaded wheel (124 KB)
+```
+
+### 22.3 Artifacts saved by the workflow
+
+The `publish` job uploads a `pilot-release-log.json` artifact with the full
+run record — plan, computed versions, plugin outputs, timings. Useful for
+debugging failed runs without re-running them.
+
+---
+
+## 23. Testing Strategy
+
+### 23.1 Layers
+
+1. **Unit tests (vitest)** — cover every pure function: trailer parser,
+   version bumper, cascade calculator, tag resolver, glob matcher, retry
+   policy. Target: 100% coverage for `pilot-core/src/` excluding plugin
+   adapters.
+
+2. **Plugin contract tests** — each plugin must pass a shared test suite
+   (`@pilot/pilot-plugin-testkit`) that asserts the interface contract
+   independent of the real registry.
+
+3. **Integration tests (mocked registries)** — spin up `verdaccio`
+   (for npm), `pypiserver` (for PyPI), and stub crates.io HTTP with
+   `msw`. Full publish cycles end-to-end, verifying idempotency, retry,
+   and tag creation.
+
+4. **Workflow tests (`act`)** — run the GHA action locally via `act` on
+   fixture repos. Catches action.yml misconfig and wrapper bugs.
+
+5. **Smoke scenarios** — the `examples/` directory holds reference
+   monorepos (rust+python+ts, rust-only, python-only, npm-only). CI runs
+   the full workflow on each.
+
+### 23.2 TDD for release logic
+
+The release semantics (trailer parsing, cascade, version bumps, tag
+ordering) are the most error-prone parts. These must be TDD'd:
+**red → green → refactor**, tests written first in every PR that changes
+this logic. The CI runs a strict lint: core PRs without a test file in the
+diff fail the build.
+
+### 23.3 Golden tests for CLI output
+
+`pilot plan --json` output is snapshot-tested against golden files in
+`test/golden/`. This catches accidental changes in the matrix contract
+(which would break user workflow YAMLs).
+
+### 23.4 Publish on real registries (gated)
+
+A separate workflow (`.github/workflows/real-publish-test.yml`) runs
+weekly against real registries using a canary package (`@pilot-canary/*`).
+Verifies OIDC remains configured correctly after any registry policy
+change.
+
+---
+
+## 24. Distribution
+
+### 24.1 npm packages
+
+All published under the `@pilot/` scope:
+
+| Package                      | Purpose                                    |
+|------------------------------|--------------------------------------------|
+| `@pilot/pilot-core`          | Shared core; plugin API                    |
+| `@pilot/pilot` (CLI)         | Binary entry; `pilot` command              |
+| `@pilot/pilot-crates`        | Built-in Rust plugin                       |
+| `@pilot/pilot-pypi`          | Built-in Python plugin                     |
+| `@pilot/pilot-npm`           | Built-in npm plugin                        |
+| `@pilot/pilot-plugin-testkit`| Test harness for plugin authors            |
+
+### 24.2 The action
+
+Published as `thekevinscott/put-it-out-there@v0` — GitHub consumes from the
+repo directly. Bundled with `@vercel/ncc` into `dist/index.js` + `action.yml`.
+A release workflow on this repo tags `v0`, `v0.1.x`, etc.
+
+### 24.3 Global install
+
+```
+npm i -g @pilot/pilot
+```
+
+Or `npx @pilot/pilot <cmd>` for one-off use.
+
+### 24.4 First-run for new users
+
+```
+cd my-monorepo
+npx @pilot/pilot init
+# edit pilot.toml
+git add . && git commit -m "chore: add pilot
+
+release: skip"
+git push
+# first real release:
+git commit -m "feat: add X
+
+release: minor"
+git push
+```
+
+---
+
+## 25. v0 MVP Scope
+
+Explicit cut list. v0 ships when **all** of these work end-to-end on the
+reference `examples/rust-python-ts/` repo:
+
+### 25.1 In scope
+
+- [x] `pilot.toml` parsing and schema validation
+- [x] Trailer parsing (`release: patch|minor|major|skip [packages]`)
+- [x] Path-filter cascade
+- [x] Three built-in plugins (crates, pypi, npm)
+- [x] Plugin loader (built-in + user-installed)
+- [x] OIDC and token auth for each registry
+- [x] Idempotency check + retry per registry
+- [x] Version-file updates (Cargo.toml, pyproject.toml, package.json)
+- [x] Tag creation + GitHub Release per package
+- [x] `pilot init` (Claude variant only)
+- [x] `pilot plan` / `plan --dry-run`
+- [x] `pilot publish`
+- [x] Dry-run PR check workflow
+- [x] Structured logs
+- [x] `pilot doctor`
+
+### 25.2 Explicitly out of v0
+
+- [ ] `pilot rollback` — design locked (§19), implementation deferred to v0.1.
+- [ ] Post-release smoke tests — design locked (§20), deferred.
+- [ ] `pilot changelog` — not designed.
+- [ ] Non-Claude agent variants for `pilot init`.
+- [ ] Private registry support.
+- [ ] Pre-release dist-tags (rc, beta, alpha).
+- [ ] Hotfix branches.
+- [ ] `pilot status` dashboard.
+
+### 25.3 Success criteria
+
+v0 is "done" when:
+
+1. The pilot repo itself uses pilot for its releases (dogfooding).
+2. The dirsql monorepo (user's canonical use case) releases cleanly via
+   pilot, replacing whatever ad-hoc script it has today.
+3. Full publish cycle runs in under 5 minutes on the reference repo.
+4. Adding a new plugin (e.g., `@pilot/pilot-ruby`) takes under a day for
+   someone familiar with Ruby gem publishing.
+5. README walkthrough is reproducible by someone who has never seen pilot
+   in under 30 minutes.
+
+---
