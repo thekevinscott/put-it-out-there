@@ -22,7 +22,7 @@
 8. [Plugin Discovery & Loading](#8-plugin-discovery--loading)
 9. [Workflow Shape](#9-workflow-shape)
 10. [Release Trailer Convention](#10-release-trailer-convention)
-11. [Path-Filter Cascade](#11-path-filter-cascade)
+11. [Cascade Algorithm](#11-cascade-algorithm)
 12. [Build Step (User-Owned Matrix)](#12-build-step-user-owned-matrix)
 13. [Publishing & Idempotency](#13-publishing--idempotency)
 14. [Versioning & Tags](#14-versioning--tags)
@@ -136,17 +136,25 @@ Changelog generation is orthogonal: it reads PR titles and descriptions for
 the commits since the last release tag — the trailer doesn't need to
 duplicate that.
 
-### 2.3 Why path filters (instead of a cascade graph)
+### 2.3 Why path filters plus `depends_on`
 
-Cross-language dependencies (Python package wrapping a Rust crate via PyO3,
-for instance) can't be expressed in Cargo.toml or pyproject.toml. Asking the
-user to maintain a separate cascade graph duplicates that knowledge.
+Cross-language dependencies (a Python package wrapping a Rust crate via
+PyO3, for instance) can't be expressed in Cargo.toml or pyproject.toml.
+The user has to tell pilot about the relationship somehow.
 
-Instead, each package declares the glob patterns that affect it. If the Python
-package wraps Rust, its `paths` array includes both `packages/python/**/*.py`
-and `packages/rust/**`. Changes to the Rust crate naturally trigger a Python
-re-release. No graph traversal, no implicit ordering — just "did any of my
-source paths change since the last release of this package?"
+Each package declares the globs that directly trigger its release (`paths`)
+plus an optional `depends_on` list naming other packages. The cascade
+algorithm (§11.1) unions direct path matches with transitive dep matches.
+
+This keeps the common case trivial — independent packages just declare
+their `paths` and omit `depends_on` — while the dep-graph case stays
+explicit and DRY. The Rust path lives in one place (`dirsql-rust.paths`);
+`dirsql-python` says `depends_on = ["dirsql-rust"]`.
+
+Pilot does not try to infer the graph from Cargo.toml path-deps or
+maturin config. Cross-ecosystem edges aren't declarable anywhere in the
+source-of-truth manifests, so inference would break silently where it
+matters most.
 
 ### 2.4 Why pluggable publishing
 
@@ -306,8 +314,9 @@ path    = "packages/python"                  # working dir for build/publish
 paths   = [                                  # cascade triggers (globs)
   "packages/python/**/*.py",
   "packages/python/pyproject.toml",
-  "packages/rust/**",
 ]
+depends_on = ["dirsql-rust"]                 # transitive cascade: if
+                                             # dirsql-rust releases, so do I
 
 # Registry-specific:
 pypi    = "dirsql"                           # name on PyPI (may differ from name)
@@ -331,6 +340,7 @@ token_env = "PYPI_TOKEN"                     # used when auth = "token"
 | `kind`           | yes      | string       | —                 | `crates` \| `pypi` \| `npm` (extensible)          |
 | `path`           | yes      | string       | —                 | Working directory; relative to repo root         |
 | `paths`          | yes      | [string]     | —                 | Glob patterns for cascade                        |
+| `depends_on`     | no       | [string]     | `[]`              | Other package names; transitive cascade          |
 | `tag_format`     | no       | string       | `pilot.tag_format`| `{version}` and `{package}` interpolation        |
 | `first_version`  | no       | string       | `0.1.0`           | Semver                                           |
 | `auth`           | no       | string       | `oidc`            | `oidc` \| `token`                                 |
@@ -708,23 +718,56 @@ When `workflow_dispatch` is triggered manually:
 
 ---
 
-## 11. Path-Filter Cascade
+## 11. Cascade Algorithm
+
+The cascade is the set of packages that will release on a given commit.
+Two inputs: path globs (direct triggers) and `depends_on` (transitive
+triggers).
 
 ### 11.1 Algorithm
 
-For each `[[package]]` in `pilot.toml`:
+Two-pass fixed-point:
 
-1. Resolve `last_tag` for this package (see §14 for tag-format resolution).
-2. Compute `git diff --name-only $last_tag..HEAD`.
-3. If any changed file matches any glob in `package.paths`, the package is
-   **cascaded** — it will be released.
+```
+Pass 1 (direct):
+  for each package P:
+    last_tag = resolve_last_tag(P)
+    changed  = git diff --name-only $last_tag..HEAD
+    if any file in changed matches any glob in P.paths:
+      cascade.add(P)
 
-### 11.2 Glob semantics
+Pass 2 (transitive, until stable):
+  repeat until no change:
+    for each package P not yet in cascade:
+      if any of P.depends_on is in cascade:
+        cascade.add(P)
+```
 
-Globs use `minimatch` with these flags: `{ dot: true, matchBase: false }`.
-Double-star crosses directory boundaries. Brace-expansion enabled.
+Direct path matches and dep-graph matches are unioned. A package with no
+direct path match but a `depends_on` that cascades will still release.
 
-Examples:
+### 11.2 Why `depends_on` instead of duplicated globs
+
+Transitive cascade used to be expressed by duplicating the upstream
+package's globs into the downstream package's `paths`. That worked for two
+packages but scaled poorly — a change to the upstream path meant editing
+every downstream config, and silent failure was easy (forget the
+duplication → downstream never releases).
+
+`depends_on` makes the graph explicit. One source of truth per path glob;
+the dep edge says "I also release when my dep does." Independent packages
+leave `depends_on` out entirely — no graph for them.
+
+### 11.3 Cycle detection
+
+If `depends_on` forms a cycle (A → B → A), `pilot plan` fails loud at
+validation time. Cycles are a config error; pilot does not try to break
+them.
+
+### 11.4 Glob semantics
+
+Globs use `minimatch` with `{ dot: true, matchBase: false }`. Double-star
+crosses directory boundaries. Brace expansion enabled.
 
 | Glob                                | Matches                                        |
 |-------------------------------------|------------------------------------------------|
@@ -733,19 +776,17 @@ Examples:
 | `packages/{python,rust}/**`         | either subtree                                 |
 | `Cargo.lock`                        | exact file at repo root                        |
 
-### 11.3 First release
+### 11.5 First release
 
 If no tag matches this package's `tag_format`, diff from the **repo root
 commit** — every file in `paths` counts as "changed." The plugin uses
 `first_version` (default `0.1.0`).
 
-### 11.4 Explicit overrides
+### 11.6 Explicit trailer overrides
 
-The `release:` trailer's optional `[packages, ...]` suffix allows bypassing
-the path-filter cascade:
-
-- If listed: only those packages publish, regardless of path-filter match.
-- If omitted: default cascade applies.
+The `release:` trailer's optional `[packages, ...]` suffix **forces** the
+listed packages to release regardless of the cascade result (see §10.7
+for precedence and §10.5 for the full semantics).
 
 ---
 
@@ -855,20 +896,13 @@ no_retry_on:    PluginAuthError, PluginFatalError, 4xx other than 429
 
 ### 13.3 Publish order
 
-Packages publish in parallel when safe. "Safe" = no two packages in the
-cascade declare each other in their `paths`. In practice, a Python package
-wrapping a Rust crate has the Rust crate's paths inside its own `paths`, so:
+Packages publish in parallel when safe. Ordering is derived from the
+`depends_on` graph (§11): if A is in B's transitive `depends_on`, A
+publishes before B. Packages with no dep relationship to each other
+publish concurrently.
 
-- If `dirsql-rust.paths` is `["packages/rust/**"]`, and
-- `dirsql-python.paths` is `["packages/python/**", "packages/rust/**"]`,
-
-a change to `packages/rust/src/lib.rs` cascades both. Pilot detects the
-overlap and publishes `dirsql-rust` **first** (because its paths are a
-subset of `dirsql-python`'s), then `dirsql-python`. The ordering rule: if
-`A.paths ⊆ B.paths`, publish A before B.
-
-This is the only implicit ordering in the system. If the user wants
-different ordering, they structure paths accordingly.
+A toposort over `depends_on` produces the order. Because cycles fail
+validation (§11.3), the sort is always well-defined.
 
 ### 13.4 Failure handling mid-cascade
 
@@ -1526,10 +1560,8 @@ name          = "dirsql-python"
 kind          = "pypi"
 path          = "packages/python"
 pypi          = "dirsql"
-paths         = [
-  "packages/python/**",
-  "packages/rust/**",                # PyO3 wrapper — Rust changes cascade
-]
+paths         = ["packages/python/**"]
+depends_on    = ["dirsql-rust"]       # PyO3 wrapper: Rust changes cascade
 build         = "maturin"
 auth          = "oidc"
 first_version = "0.1.0"
