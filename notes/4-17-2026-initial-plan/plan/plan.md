@@ -1520,11 +1520,9 @@ $ pilot doctor
   ✓ dirsql-cli       OIDC configured
 ```
 
-### 16.5 Log safety
-
-Any env var matching `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, or `*KEY*` is
-auto-masked in pilot's logs. Values found in `process.env` whose names
-match these patterns are redacted before any log line is emitted.
+Log safety (redaction of `*TOKEN*` / `*SECRET*` / `*PASSWORD*` / `*KEY*`
+env values from every log line, including verbose failure dumps) is
+documented in §22.5.
 
 ---
 
@@ -1792,6 +1790,52 @@ In `--log-format=text` (default for interactive terms), these render as:
 The `publish` job uploads a `pilot-release-log.json` artifact with the full
 run record — plan, computed versions, handler outputs, timings. Useful
 for debugging failed runs without re-running them.
+
+### 22.4 Verbose-on-failure
+
+When a handler fails (publish error, smoke-test failure, artifact
+mismatch, anything non-transient), pilot automatically captures and
+emits a rich diagnostic dump to `$GITHUB_STEP_SUMMARY` and to the
+structured log stream. No extra workflow wiring required.
+
+For each failure, pilot writes:
+
+- **Tool versions.** `cargo --version`, `python --version`, `maturin
+  --version`, `npm --version`, `node --version`, whichever apply to
+  the failing handler.
+- **The command that failed**, verbatim, with env-var values
+  redacted per §22.5.
+- **Full stdout + stderr** of the failing command. Not truncated
+  unless the log exceeds 4 MB (GHA summary limit), in which case the
+  tail is kept and the rest is shipped as an artifact.
+- **Tool-specific extras:**
+  - **npm:** the contents of `~/.npm/_logs/*.log` at debug loglevel,
+    plus `npm pack --dry-run --json` output showing what would have
+    been published.
+  - **PyPI:** `twine check dist/*` output, artifact SHA-256 hashes,
+    and the resolved wheel platform tags (so you can see if the
+    failing target's wheel was what you expected).
+  - **crates.io:** `cargo package --list` output showing what the
+    tarball would contain, and the resolved workspace version.
+  - **napi / bundled-cli:** the per-platform package structure
+    (`tree`-style listing) and `os`/`cpu` constraints from each
+    `package.json`.
+
+Why default-on: the cost of verbose logging in the failure path is
+~seconds of log time, which nobody minds when something's broken. The
+alternative — "add verbose flags, re-trigger, hope it reproduces" —
+wastes a full cycle on a flaky failure. Mirrors the pattern dirsql's
+release workflow evolved to in PRs #144 (npm) and #149 (pypi + crates).
+
+Successful runs log at normal verbosity only. The verbose dump is
+strictly a failure-path feature.
+
+### 22.5 Log safety
+
+Values matching `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, or `*KEY*` in
+`process.env` are redacted from every log line, including the
+verbose-on-failure dump. Applies to command output captured from
+external tools as well as pilot's own log lines.
 
 ---
 
