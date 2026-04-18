@@ -31,26 +31,16 @@ continue to move forward, release cadence is preserved.
 
 1. **Tag format changes.** Today dirsql tags once per release as
    `v0.2.0` covering all packages. After migration there are three
-   tags per release: `dirsql-v0.2.0`, `dirsql-python-v0.2.0`,
-   `dirsql-v0.2.0` (npm — will collide with crates name; see below).
-   Consumers reading git tags for version info (unusual) would need
-   to update. Nobody should actually be doing this.
+   per-package tags: `dirsql-rust-v0.2.0`, `dirsql-python-v0.2.0`,
+   `dirsql-cli-v0.2.0`. Consumers reading git tags for version info
+   (unusual — nobody should be doing this) would need to update.
 
-   **One name collision to resolve:** the main npm package is
-   currently named `dirsql`, matching the crates.io name. Under
-   per-package tags they'd both try to create `dirsql-v{version}`.
-   Options:
-   - Rename the npm package internally in pilot.toml (e.g.,
-     `name = "dirsql-npm"`, keep npm display name `dirsql`).
-   - Rename the crates pilot entry (`name = "dirsql-crate"`, crate
-     name on crates.io stays `dirsql`).
-   - Accept tags for `dirsql` to be ambiguous and re-key the npm tag
-     format (e.g., a per-package `tag_format` override — not in v0).
-
-   **Recommendation:** name the pilot entries disambiguated internally
-   (`dirsql-rust`, `dirsql-python`, `dirsql-cli`); the `name` in
-   `pilot.toml` is internal and doesn't affect published package names.
-   The published names stay `dirsql` / `dirsql` / `dirsql`.
+   Pilot uses `[[package]].name` from `pilot.toml` as the tag prefix,
+   which is internal to pilot — the published registry names stay
+   `dirsql` on all three registries regardless of the tag-prefix
+   choice. The target `pilot.toml` in this doc uses
+   `dirsql-rust` / `dirsql-python` / `dirsql-cli` as the internal
+   names, which falls out naturally into unambiguous tags.
 
 2. **No automatic tag rollback.** Pilot does not delete tags on partial
    failure. The artifact completeness check prevents the class of bug
@@ -478,13 +468,5 @@ actually doing the migration:
    (for curl-to-install scripts), cargo-dist still adds value. Decide
    whether to keep it as a parallel workflow or drop it.
 
-3. **Python package name: `dirsql` or `dirsql-python`?** The pilot
-   config uses `name = "dirsql-python"` internally and `pypi = "dirsql"`
-   externally. Tags are `dirsql-python-v{N}`. If that's a problem for
-   discoverability (e.g., someone searching the repo for `dirsql v0.2.0`
-   tags and finding three), you could rename internally to `dirsql`
-   and deal with the namespace collision differently (per-package
-   `tag_format` override — not v0).
-
-4. **Scheduled cron window.** Current is 02:00 UTC daily. Keep or
+3. **Scheduled cron window.** Current is 02:00 UTC daily. Keep or
    change on cutover.
