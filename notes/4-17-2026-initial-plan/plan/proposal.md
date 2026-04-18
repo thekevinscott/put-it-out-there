@@ -126,7 +126,7 @@ every possible project.
 
 1. The `dirsql` monorepo releases cleanly via pilot, replacing its ad-hoc
    script.
-2. The `examples/rust-python-ts/` reference repo publishes to all three
+2. The `test/fixtures/polyglot-everything/` reference fixture publishes to all three
    registries on a real cadence (polyglot validation — pilot itself is
    npm-only).
 3. Full publish cycle completes successfully on the reference repo.

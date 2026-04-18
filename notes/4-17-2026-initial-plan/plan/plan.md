@@ -1902,7 +1902,65 @@ than a full test pyramid.
   meaningful change to handler or publish code.
 - **Entry:** `pnpm test:e2e` or equivalent.
 
-### 23.5 TDD red/green
+### 23.5 Fixtures: exhaustive language × build × target coverage
+
+E2E tests are driven off a library of fixture repos under
+`test/fixtures/`. Each fixture is a self-contained mini-repo with
+`pilot.toml`, source code, and a generated `release.yml`. Fixtures
+exist to cover every combination of `(kind, build, target)` that pilot
+claims to support — including polyglot combinations.
+
+Every fixture is exercised on every supported platform where that fixture
+is buildable. The fixtures are not representative — they are
+**exhaustive**. If pilot claims to support `build = "napi"`, there is a
+fixture for it; if pilot claims to support `aarch64-apple-darwin`, every
+matrix-using fixture targets it.
+
+Required fixtures (minimum set; add more as handlers grow):
+
+```
+test/fixtures/
+├── rust-crate-only/           # pure crates.io publish, source-only
+├── python-pure-setuptools/    # vanilla PyPI, setuptools backend, noarch
+├── python-pure-hatch/         # vanilla PyPI, hatch backend, noarch
+├── python-pure-sdist-only/    # no wheels at all, sdist only
+├── python-rust-maturin/       # PyO3/maturin multi-wheel
+├── js-vanilla/                # vanilla npm, no build matrix
+├── js-napi/                   # napi-rs multi-platform (.node files)
+├── js-bundled-cli/            # binary-wrapper with cargo-dist-style archives
+├── polyglot-rust-python/      # rust crate + PyO3 wrapper (depends_on)
+├── polyglot-rust-js-napi/     # rust crate + napi-rs JS wrapper
+├── polyglot-rust-js-bundled/  # rust crate + bundled-cli JS wrapper
+└── polyglot-everything/       # rust + pypi(maturin) + npm(bundled-cli) — the dirsql shape
+```
+
+Each fixture asserts:
+- `pilot.toml` parses and validates.
+- `pilot plan` emits the expected matrix (golden-file snapshot).
+- `pilot publish` (dry-run) resolves correctly and pre-flight auth check
+  passes.
+- E2E run against canary registries produces the expected packages,
+  correct platform tags, correct `optionalDependencies` (for napi /
+  bundled-cli), and correct tag placement.
+- Re-running is idempotent (already-published versions skip cleanly).
+
+**Target matrix per fixture:**
+
+| Fixture kind | Targets exercised (where applicable) |
+|---|---|
+| Any matrix-using fixture | `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc` |
+| Pure-language fixtures | single noarch artifact |
+| `python-rust-maturin` | wheels for all 5 targets + sdist |
+| `js-napi` | platform packages for all 5 targets + main |
+| `js-bundled-cli` | platform packages for all 5 targets + main |
+
+**Not representative.** Real users will have some subset of these
+combinations. The fixture library exists to guarantee pilot never
+silently breaks a combination it claims to support. A release of pilot
+must not ship if the e2e suite fails on any fixture for any supported
+target.
+
+### 23.7 TDD red/green
 
 Every PR that changes release logic must include tests written first.
 Workflow:
@@ -1914,7 +1972,7 @@ Workflow:
 
 CI lint rejects PRs that modify `src/` without touching a test file.
 
-### 23.6 Coverage
+### 23.8 Coverage
 
 Target **90%+** line and branch coverage across `src/`. Reported by
 vitest's built-in c8 integration. CI fails if a PR drops coverage
@@ -1969,7 +2027,7 @@ git push
 ## 25. v0 MVP Scope
 
 Explicit cut list. v0 ships when **all** of these work end-to-end on the
-reference `examples/rust-python-ts/` repo:
+reference fixture `test/fixtures/polyglot-everything/`:
 
 ### 25.1 In scope
 
@@ -2009,7 +2067,7 @@ v0 is "done" when:
 
 1. The dirsql monorepo (user's canonical use case) releases cleanly via
    pilot, replacing whatever ad-hoc script it has today.
-2. The `examples/rust-python-ts/` reference repo publishes cleanly to all
+2. The `test/fixtures/polyglot-everything/` reference fixture publishes cleanly to all
    three registries on a real cadence — this is the polyglot validation
    path, since the pilot repo itself only exercises npm.
 3. Full publish cycle completes successfully on the reference repo.
