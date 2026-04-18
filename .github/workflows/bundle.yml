@@ -1,0 +1,43 @@
+name: Bundle
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-dist-action:
+    name: dist-action/ is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Rebuild dist-action/
+        run: pnpm run build:action
+
+      # Native JS actions resolve the bundled entry point at runtime from
+      # the checked-in repo state. If dist-action/ drifts from src/action.ts
+      # the action is broken at `uses:` time. This job fails the PR if the
+      # rebuild produced a different bundle than what's committed.
+      - name: Check dist-action/ matches source
+        run: |
+          if ! git diff --exit-code dist-action/; then
+            echo "::error::dist-action/ is out of date. Run 'pnpm run build:action' locally and commit the result."
+            exit 1
+          fi
