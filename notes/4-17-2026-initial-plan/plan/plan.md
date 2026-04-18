@@ -777,15 +777,35 @@ build`, or any build-tool. Reasons:
 - Builds are cacheable via GHA-native mechanisms (setup-actions emit cache
   keys). Pilot would reinvent this badly.
 
-### 12.2 Targets: per-package platform list
+### 12.2 Build-type detection
 
-Packages that ship binary artifacts (wheels, compiled CLIs) declare
+Whether a package needs a build matrix at all depends on the `build`
+field. Pilot looks at `kind` + `build` together and decides what shape
+the matrix takes:
+
+| `kind` | `build`                            | Matrix? | Publishes                          |
+|--------|------------------------------------|---------|------------------------------------|
+| crates | —                                  | No      | One `.crate` (source only)         |
+| pypi   | `maturin`                          | Yes     | N wheels + 1 sdist → one PyPI name |
+| pypi   | `setuptools` / `hatch` / _omitted_ | No      | One sdist (+ one pure wheel)       |
+| npm    | `napi`                             | Yes     | N platform packages + 1 main pkg   |
+| npm    | _omitted_ (vanilla JS/TS)          | No      | One `npm publish`                  |
+
+The thesis: pure-language projects — pure Python, pure JS, pure Rust —
+have no matrix overhead. Users touching Rust-in-Python (PyO3/maturin) or
+Rust-in-JS (napi-rs) get the full multi-target dance automatically.
+Everyone else gets one artifact, one publish.
+
+### 12.3 Targets: per-package platform list
+
+Packages whose `build` requires a matrix (`maturin`, `napi`) declare
 which platforms they target:
 
 ```toml
 [[package]]
 name    = "dirsql-python"
 kind    = "pypi"
+build   = "maturin"
 targets = [
   "x86_64-unknown-linux-gnu",
   "aarch64-unknown-linux-gnu",
@@ -796,14 +816,19 @@ targets = [
 ```
 
 - `targets` is a list of triples (Rust-style, reused because they're
-  unambiguous and familiar to the PyO3/maturin crowd).
-- If `targets` is omitted, the package has a single noarch artifact.
-- Pypi packages that ship source-only can set `targets = ["sdist"]`.
-- Pypi packages that ship both wheels and sdist list the wheel targets
-  explicitly; pilot emits an extra `sdist` matrix row automatically
-  (always `runs_on: ubuntu-latest`).
+  unambiguous and familiar to the PyO3/maturin/napi crowds).
+- For `build = "maturin"`: pilot emits one matrix row per target
+  (produces the platform wheel) plus one `sdist` row automatically.
+  All wheels + sdist upload to a **single** PyPI package name.
+- For `build = "napi"`: pilot emits one matrix row per target (produces
+  a platform-specific npm package `{name}-{target}`) plus one `main`
+  row (builds and publishes the parent package with
+  `optionalDependencies` pointing at the platform packages it just
+  shipped). See §13.6.
+- For any build that doesn't need a matrix, `targets` is ignored (with
+  a warning at `pilot doctor` time if set).
 
-### 12.3 Matrix output contract
+### 12.4 Matrix output contract
 
 `pilot plan` emits one JSON row per (package × target). The row names
 the expected artifact deterministically:
@@ -848,7 +873,7 @@ Pilot ships opinionated `runs_on` defaults per target (e.g., native
 aarch64 on `ubuntu-24.04-arm` to avoid cross-compile). The user can
 override in their workflow YAML if their project needs something else.
 
-### 12.4 Artifact handoff
+### 12.5 Artifact handoff
 
 Build job uploads via `actions/upload-artifact@v4` using the
 `artifact_name` from the matrix row. Publish job downloads with
@@ -872,7 +897,40 @@ If `isPublished(version) === true`, the handler returns
 `{ status: 'already-published' }` and the run succeeds. This makes retries
 safe and lets users re-trigger a failed workflow without consequences.
 
-### 13.2 Retry policy
+### 13.2 Artifact completeness check (default on)
+
+Before any publish side effect, pilot validates that every artifact the
+plan expected is present. For each cascaded package:
+
+1. Enumerate expected artifacts from the plan's matrix rows for this
+   package (one per target, plus the `sdist` / `main` row if applicable).
+2. Check each `artifact_name` exists in the downloaded artifact tree
+   and is non-empty.
+3. Basic sanity: wheels have a `.whl` extension and a platform tag
+   matching the declared target; crates have a `.crate`; sdist has a
+   `.tar.gz`; napi platform packages have a `.node` file.
+
+If any expected artifact is missing, the run **aborts for that package**
+with a message naming the missing target and the matrix row that was
+supposed to produce it:
+
+```
+error: dirsql-python is missing 1 of 6 expected artifacts.
+  Missing: dirsql-python-wheel-aarch64-unknown-linux-gnu
+    (target: aarch64-unknown-linux-gnu, runs_on: ubuntu-24.04-arm)
+  Check the build job logs for that matrix row.
+  No side effects performed. Re-run after fixing.
+```
+
+No partial publish. No tag. No GitHub Release. This is default-on; a
+user who wants to publish partial sets has to explicitly override with
+`--allow-incomplete`, which is not supported in v0.
+
+This check also guards against user-authored workflow bugs (wrong
+`needs:` gate, `fail-fast: false` hiding a failure, etc.) — pilot's
+check runs regardless of what the workflow YAML did.
+
+### 13.3 Retry policy
 
 Applied uniformly by the orchestrator (not per-handler):
 
@@ -887,7 +945,7 @@ no_retry_on:    AuthError, other errors, 4xx other than 429
 
 429 is treated as transient with respect for `Retry-After`.
 
-### 13.3 Publish order
+### 13.4 Publish order
 
 Packages publish in parallel when safe. Ordering is derived from the
 `depends_on` graph (§11): if A is in B's transitive `depends_on`, A
@@ -897,14 +955,14 @@ publish concurrently.
 A toposort over `depends_on` produces the order. Because cycles fail
 validation (§11.3), the sort is always well-defined.
 
-### 13.4 Failure handling mid-cascade
+### 13.5 Failure handling mid-cascade
 
 If package N in a 3-package cascade fails, packages 1..N-1 stay published
 (registries don't support rollback anyway). Package N+1..end are skipped.
 The run exits non-zero. Re-running after fixing the issue is safe because
 of §13.1 idempotency.
 
-### 13.5 Tag creation (no-push model)
+### 13.6 Tag creation (no-push model)
 
 Pilot does **not** create or push a synthetic "bump" commit back to main.
 Manifest edits live in the CI worktree for the duration of the build and
@@ -940,6 +998,52 @@ Consequences:
   stale manifest version. Documented as expected behavior; users who
   want local builds labeled with the current version can set manifest
   to `0.0.0-dev` as a sentinel.
+
+### 13.7 npm platform-package orchestration (`build = "napi"`)
+
+npm has no native platform resolution, so pilot implements the
+community-standard optional-deps pattern used by esbuild, swc, and
+every napi-rs project.
+
+For a napi package `dirsql-cli` with targets
+`[linux-x64-gnu, darwin-arm64, ...]`:
+
+1. **Platform packages first.** For each target, pilot publishes a
+   per-platform package named `{name}-{target}` (e.g.,
+   `dirsql-cli-linux-x64-gnu`) containing just the `.node` binary and
+   a minimal package.json with `os`/`cpu` fields narrowed to that
+   platform. These publish in parallel.
+
+2. **Main package last.** The parent package's `package.json` is
+   rewritten in the CI worktree to add an `optionalDependencies` block
+   pointing at the exact versions pilot just published:
+
+   ```json
+   "optionalDependencies": {
+     "dirsql-cli-linux-x64-gnu":    "0.2.0",
+     "dirsql-cli-darwin-arm64":     "0.2.0",
+     "dirsql-cli-win32-x64-msvc":   "0.2.0"
+   }
+   ```
+
+   Only then does pilot publish the main package. npm's installer
+   reads `optionalDependencies`, filters by `os`/`cpu` of the end
+   user's machine, and pulls down just the matching platform
+   package.
+
+3. **Ordering is enforced.** If any platform-package publish fails,
+   the main package is **not** published — otherwise installers would
+   pull the main, fail to find a matching optional dep, and break for
+   that platform silently.
+
+4. **Naming convention.** `{name}-{target}` follows napi-rs's
+   scaffolded convention (`@scope/package-linux-x64-gnu` for scoped
+   packages). Pilot computes the names deterministically from `name`
+   and `targets`; the user doesn't pick them.
+
+5. **Idempotency.** Each platform package's `isPublished` check runs
+   independently; partial re-publishes skip already-shipped ones
+   cleanly.
 
 ---
 
