@@ -54,6 +54,7 @@ export function run(argv: readonly string[]): Promise<number> {
 }
 
 // Entry point when invoked as `pilot` or `node dist/cli.js`.
+/* v8 ignore start -- entry-point guard; only reachable when invoked as a binary */
 if (import.meta.url === `file://${process.argv[1]}`) {
   run(process.argv).then(
     (code) => {
@@ -65,3 +66,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     },
   );
 }
+/* v8 ignore stop */

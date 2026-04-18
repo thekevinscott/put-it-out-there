@@ -1,0 +1,45 @@
+name: TDD Lint
+
+# Enforces the red/green TDD discipline from plan.md §23.7: PRs that
+# modify src/ must also touch at least one *.test.ts file. CI rejects
+# non-test-bearing PRs.
+
+on:
+  pull_request:
+
+concurrency:
+  group: tdd-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  require-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check src/ changes are accompanied by tests
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'src/')
+          if [ -z "$changed" ]; then
+            echo "No src/ changes in this PR -- skipping TDD lint."
+            exit 0
+          fi
+          # A PR is test-bearing if the diff touches any *.test.ts file.
+          tests_changed=$(echo "$changed" | grep -E '\.test\.ts$' || true)
+          non_test_changed=$(echo "$changed" | grep -v -E '\.test\.ts$' || true)
+          if [ -n "$non_test_changed" ] && [ -z "$tests_changed" ]; then
+            echo "::error::src/ changes detected without matching *.test.ts changes."
+            echo "PR modifies:"
+            echo "$non_test_changed" | sed 's/^/  /'
+            echo ""
+            echo "Write a failing test first (red) then implement it (green)."
+            echo "See plan.md §23.7."
+            exit 1
+          fi
+          echo "OK: src/ changes include *.test.ts updates."

@@ -16,6 +16,7 @@ export function main(): void {
   process.exit(0);
 }
 
+/* v8 ignore next 3 -- entry-point guard; only reachable when invoked as a binary */
 if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
