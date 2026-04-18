@@ -1636,3 +1636,204 @@ jobs:
 ```
 
 ---
+
+## 28. Open Questions
+
+Items the v0 design intentionally does not resolve; answers will emerge
+from dogfooding.
+
+### 28.1 Monorepo vs. multirepo
+
+Pilot v0 assumes a single monorepo with one `pilot.toml`. The alternative
+(many single-package repos) is already well-served by existing per-ecosystem
+tooling. An open question: when does the monorepo overhead stop being
+worth it? Probably not pilot's problem to solve, but we should notice if
+users are reaching for both pilot and tools like `release-please` in the
+same repo.
+
+### 28.2 Build caching
+
+The user-authored build step will benefit from GHA caching (`actions/cache`,
+language-specific setup actions). Pilot currently has no opinion on this
+— the workflow example shows naive builds. As the reference examples grow,
+we'll document recommended cache patterns but **not** implement caching
+inside pilot itself.
+
+### 28.3 Signed commits / tags
+
+The version-bump commit is unsigned by default. `pilot.commit_sign = true`
+enables signing via the GHA action's built-in GPG key setup (see
+`crazy-max/ghaction-import-gpg`). Unclear whether users want the same for
+tags. Deferred until asked.
+
+### 28.4 How opinionated should plugin defaults be?
+
+Example: `@pilot/pilot-pypi` could auto-detect the build backend from
+`pyproject.toml` (`tool.maturin`, `tool.setuptools`, `tool.hatch`) and
+pick sensible defaults. v0 requires explicit `build = "maturin"` in the
+package config. Might relax later.
+
+### 28.5 What happens when two PRs merge in quick succession?
+
+Both trigger `release.yml`. The first wins the tag; the second may see a
+non-fast-forward on its version-bump push (§14.6) and abort. The user
+re-runs. This is the correct behavior — but it's friction. Open question:
+is the UX good enough, or does pilot need a queue/lock? v0 ships without
+one.
+
+### 28.6 Multi-registry dual-publishing
+
+Some packages want to ship to both npm and GitHub Packages, or crates.io
+and a private mirror. Not in v0. Likely a plugin-layer concern
+(`@pilot/pilot-npm-plus-gh-packages` or similar) rather than a core
+feature.
+
+---
+
+## 29. Risks & Mitigations
+
+### 29.1 "A registry changes its API and pilot breaks."
+
+**Likelihood:** Medium (crates.io/PyPI/npm all actively evolving).
+**Impact:** High (release workflow broken).
+**Mitigation:**
+- Plugin layer absorbs the change; core is untouched.
+- Weekly canary publish (§23.4) catches drift before users hit it.
+- Plugins publish patches independently; users upgrade via `npm i -D`.
+
+### 29.2 "OIDC configuration is fiddly and scares users off."
+
+**Likelihood:** High.
+**Impact:** Medium (users fall back to tokens, which is still fine).
+**Mitigation:**
+- `pilot doctor` explicitly diagnoses OIDC misconfiguration with exact
+  fix steps (URLs, repo settings).
+- Token fallback is documented as first-class, not second-class.
+- `pilot init` writes tokens-only workflows by default and surfaces the
+  OIDC upgrade path in a follow-up tip.
+
+### 29.3 "Trailer convention is a conceptual hurdle for new users."
+
+**Likelihood:** Medium.
+**Impact:** Medium (they get releases they didn't expect, or miss bumps).
+**Mitigation:**
+- Path-filter cascade handles the 90% case with no trailer needed.
+- `pilot init` writes `pilot/AGENTS.md` which explains the trailer for
+  LLM agents.
+- Dry-run PR check surfaces "this will auto-release" before merge so
+  surprises are caught early.
+
+### 29.4 "Plugin ecosystem fragments."
+
+**Likelihood:** Low (starts with only built-ins; solo maintainer for now).
+**Impact:** Low initially, grows if external plugins proliferate.
+**Mitigation:**
+- Maintain a curated `awesome-pilot-plugins` list in-repo.
+- Plugin testkit (`@pilot/pilot-plugin-testkit`) enforces the contract;
+  any plugin passing it should be swap-in compatible.
+
+### 29.5 "The version-bump commit push race (§28.5)."
+
+**Likelihood:** Low for solo maintainers; rises with team size.
+**Impact:** Medium (run fails, needs manual re-trigger).
+**Mitigation:**
+- v0 accepts the race and fails loud.
+- v0.2 may add an advisory lock via a GitHub Actions concurrency group,
+  which GHA supports natively (`concurrency: release`).
+
+### 29.6 "Registry outage mid-cascade publishes half the packages."
+
+**Likelihood:** Medium (crates.io and PyPI both have ~hours/year outages).
+**Impact:** Medium (inconsistent state across registries).
+**Mitigation:**
+- Idempotency check (§13.1) lets re-runs safely skip already-published
+  packages.
+- Cascade order is deterministic, so a re-run picks up exactly where it
+  left off.
+- Log includes "N of M published" summary for debugging.
+
+### 29.7 "Rust+Python PyO3 wheel builds are slow and platform-matrixed."
+
+**Likelihood:** Guaranteed for any Rust-backed Python package.
+**Impact:** Medium (release takes 20-30 minutes instead of 5).
+**Mitigation:**
+- User-owned build matrix means they choose how much to parallelize.
+- Reference example shows `maturin-action` with cross-compile.
+- Not pilot's problem to solve the build-speed question.
+
+### 29.8 "npm provenance / OIDC requires repo metadata in package.json."
+
+**Likelihood:** High the first time.
+**Impact:** Low (clear error message).
+**Mitigation:**
+- `@pilot/pilot-npm` validates `repository` field in `package.json`
+  pre-publish and fails loudly if missing with a fix-it hint.
+
+---
+
+## 30. Appendix A: Why Not X?
+
+Short case against each alternative considered.
+
+### 30.1 Why not release-please?
+
+- Release-PR model introduces review friction that doesn't fit a solo
+  maintainer merging LLM output.
+- Excellent at monorepo versioning but prescribes conventional-commits
+  rigidly.
+- Doesn't publish to crates.io (as of 2026-04). Adds PyPI and npm with
+  extra adapters.
+
+### 30.2 Why not changesets?
+
+- Per-change `.md` file authoring is pure overhead when every commit is
+  already a deliberate unit of work.
+- Primarily npm-focused; PyPI/crates.io are second-class.
+- Release-PR model again.
+
+### 30.3 Why not semantic-release?
+
+- Conventional commits enforced rigidly; one malformed commit fails the
+  pipeline.
+- Plugin ecosystem is large but inconsistent quality.
+- Not designed for polyglot; one repo-one-package is the happy path.
+
+### 30.4 Why not Knope?
+
+- Release-PR model.
+- Built around a specific workflow (Knope's own "release stages") that
+  doesn't generalize cleanly.
+
+### 30.5 Why not Cranko?
+
+- Closest in philosophy (monorepo, polyglot, explicit intent).
+- Requires the `rc:` branch convention with merge-to-rc → review → merge-to-main
+  flow. Extra ceremony for solo maintainers.
+- Rust-centric; Python/npm support exists but is less polished.
+
+### 30.6 Why not roll your own scripts?
+
+- Each registry's auth, idempotency, and retry logic is non-trivial.
+- Version-file updates (Cargo.toml / pyproject.toml / package.json) are
+  ecosystem-specific and easy to get subtly wrong.
+- Every team re-solves the same problem; pilot's thesis is that a small,
+  shared tool with plugin seams beats N bespoke bash scripts.
+
+### 30.7 Why not GoReleaser?
+
+- Go-specific; multi-ecosystem is nominal.
+- Config shape (`.goreleaser.yml`) assumes Go binaries as the primary
+  artifact.
+
+### 30.8 Why not Nx / Turborepo release plugins?
+
+- Tied to the Nx/Turborepo build systems. Pilot intentionally does not
+  own the build system — users pick their own (bazel, make, native
+  cargo/pip/npm, etc.).
+
+---
+
+_End of v0 plan._
+
+Feedback welcome on the branch or via issues against
+https://github.com/thekevinscott/put-it-out-there.
