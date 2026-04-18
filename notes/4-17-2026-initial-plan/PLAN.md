@@ -30,7 +30,7 @@
 16. [Credentials (OIDC + Tokens)](#16-credentials-oidc--tokens)
 17. [CLAUDE.md / AGENTS.md Integration](#17-claudemd--agentsmd-integration)
 18. [Dry-Run as PR Check](#18-dry-run-as-pr-check)
-19. [Rollback Primitive](#19-rollback-primitive)
+19. [When a Release Goes Bad](#19-when-a-release-goes-bad)
 20. [Post-Release Verifier](#20-post-release-verifier)
 21. [Command Surface (`pilot` CLI)](#21-command-surface-pilot-cli)
 22. [State & Logs](#22-state--logs)
@@ -1126,44 +1126,33 @@ Skipped (no matching path changes):
 
 ---
 
-## 19. Rollback Primitive
+## 19. When a Release Goes Bad
 
-### 19.1 Scope
+Pilot intentionally does **not** ship a `rollback` command. Republishing
+old code under a new version number misleads consumers with `>=` pins:
+they upgrade expecting forward motion and silently get older behavior.
+That's worse than the disease.
 
-Registries do not support true rollback. "Rollback" in pilot means:
-**republish the previous version's code under a new version number.**
+Use the registries' own primitives:
 
-### 19.2 Command
+- **crates.io:** `cargo yank --vers X.Y.Z` — marks the version as
+  don't-resolve-to-this. Consumers pinned `>=X.Y.Z` fall back to the last
+  good version until a real fix ships. Never deletes code.
+- **PyPI:** yank via the web UI or `twine` — same semantics as crates.io.
+- **npm:** `npm deprecate <pkg>@<version> "<reason>"` prints a warning to
+  installers. Within the 72-hour window, `npm unpublish` is available but
+  should be avoided — it breaks anyone who's already pulled the version.
 
-```
-pilot rollback --package dirsql-python --to 0.1.45
-```
+The correct "rollback" path when a release goes bad:
 
-### 19.3 Behavior
+1. `git revert` the problem commit on a branch, PR, merge.
+2. Pilot ships the revert as a normal patch (e.g., `0.1.46` containing
+   the known-good behavior).
+3. Yank/deprecate `0.1.45` on the registry so installers skip it.
 
-1. `git checkout` the tag for `dirsql-python-v0.1.45` into a temporary
-   worktree.
-2. Compute the next version (`0.1.46` if current is `0.1.45`, or
-   `$current_patch + 1` if the current tag is higher).
-3. Write that version into the plugin's version file.
-4. Build from that worktree (user-provided command, same as normal build).
-5. Publish via the normal plugin path.
-6. Tag and release, with release notes: `Rollback to 0.1.45 code (released
-   as 0.1.46)`.
-
-### 19.4 Why not just re-tag
-
-- crates.io and PyPI won't accept a re-publish of the same version number.
-- npm's 72-hour window allows `npm unpublish` but that breaks consumers
-  who've already pulled the bad version.
-
-Publishing a new patch with the old code is the least-harmful primitive.
-
-### 19.5 Guardrails
-
-- `--to` must be strictly older than the current tag.
-- Requires `--confirm` flag or a `ROLLBACK_CONFIRMED=1` env in CI.
-- Never run automatically from the release workflow — operator-only.
+This gives consumers monotonic version numbers and correct resolution
+semantics. It also keeps pilot's scope small — registry-side actions are
+one-shot operator commands, not workflow primitives.
 
 ---
 
@@ -1209,7 +1198,8 @@ Smoke test failure does **not** unpublish (it usually can't). It:
 - Fails the publish job loudly.
 - Opens a GitHub issue (`pilot: smoke test failed for dirsql-python 0.3.5`)
   if `pilot.smoke_opens_issue = true`.
-- Suggests `pilot rollback --package dirsql-python --to 0.3.4` in the log.
+- Suggests yanking/deprecating the broken version and preparing a
+  `git revert` patch release (§19).
 
 ### 20.4 Timing
 
@@ -1236,8 +1226,6 @@ pilot plan                      Print release plan for HEAD (dry-run by default)
 pilot plan --dry-run            Explicit dry-run (no side effects)
 pilot plan --json               JSON output for CI
 pilot publish                   Execute the plan (CI-intended)
-pilot rollback --package <p> --to <v>
-                                Republish old version as next patch
 pilot status                    Show last released version per package
 pilot doctor                    Validate config + plugins + auth
 pilot version                   Print CLI version
@@ -1425,7 +1413,6 @@ reference `examples/rust-python-ts/` repo:
 
 ### 25.2 Explicitly out of v0
 
-- [ ] `pilot rollback` — design locked (§19), implementation deferred to v0.1.
 - [ ] Post-release smoke tests — design locked (§20), deferred.
 - [ ] `pilot changelog` — not designed.
 - [ ] Non-Claude agent variants for `pilot init`.
@@ -1458,7 +1445,6 @@ etc. based on dogfooding outcomes.
 
 ### 26.1 v0.1 (quick follow-ups)
 
-- `pilot rollback` implementation.
 - Post-release smoke tests (§20).
 - `pilot changelog` — generate markdown release notes from PR titles and
   bodies since last tag.
