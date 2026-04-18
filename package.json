@@ -1,6 +1,6 @@
 {
   "name": "putitoutthere",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Polyglot release orchestrator for crates.io, PyPI, and npm",
   "license": "MIT",
   "repository": {
