@@ -1438,9 +1438,11 @@ reference `examples/rust-python-ts/` repo:
 
 v0 is "done" when:
 
-1. The pilot repo itself uses pilot for its releases (dogfooding).
-2. The dirsql monorepo (user's canonical use case) releases cleanly via
+1. The dirsql monorepo (user's canonical use case) releases cleanly via
    pilot, replacing whatever ad-hoc script it has today.
+2. The `examples/rust-python-ts/` reference repo publishes cleanly to all
+   three registries on a real cadence — this is the polyglot validation
+   path, since the pilot repo itself only exercises npm.
 3. Full publish cycle runs in under 5 minutes on the reference repo.
 4. Adding a new plugin (e.g., `@pilot/pilot-ruby`) takes under a day for
    someone familiar with Ruby gem publishing.
