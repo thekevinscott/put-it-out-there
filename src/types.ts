@@ -11,15 +11,19 @@ export type Kind = 'crates' | 'pypi' | 'npm';
 
 export type Bump = 'patch' | 'minor' | 'major';
 
-/** Shape filled in by #5. */
+/**
+ * Shape handlers see. Optional fields explicitly allow `undefined` so
+ * the Zod-parsed `Package` (discriminated union from src/config.ts)
+ * assigns cleanly under exactOptionalPropertyTypes.
+ */
 export interface PackageConfig {
   name: string;
   kind: Kind;
   path: string;
   paths: string[];
-  depends_on?: string[];
-  first_version?: string;
-  smoke?: string;
+  depends_on?: string[] | undefined;
+  first_version?: string | undefined;
+  smoke?: string | undefined;
   // Handler-specific fields are validated by each handler's Zod schema.
   [key: string]: unknown;
 }
@@ -39,6 +43,12 @@ export interface Ctx {
   log: Logger;
   env: Record<string, string>;
   artifacts: ArtifactStore;
+  /**
+   * Where `actions/download-artifact@v4` dumped the per-row artifacts.
+   * Conventionally `${cwd}/artifacts`. Handlers scan this for the files
+   * they need to upload. Optional so local/doctor flows can omit.
+   */
+  artifactsRoot?: string;
 }
 
 export interface Logger {
