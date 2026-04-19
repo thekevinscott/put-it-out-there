@@ -39,6 +39,12 @@ export interface Ctx {
   log: Logger;
   env: Record<string, string>;
   artifacts: ArtifactStore;
+  /**
+   * Where `actions/download-artifact@v4` dumped the per-row artifacts.
+   * Conventionally `${cwd}/artifacts`. Handlers scan this for the files
+   * they need to upload. Optional so local/doctor flows can omit.
+   */
+  artifactsRoot?: string;
 }
 
 export interface Logger {

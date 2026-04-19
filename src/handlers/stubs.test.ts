@@ -7,7 +7,6 @@
 
 import { describe, expect, it } from 'vitest';
 import { npm } from './npm.js';
-import { pypi } from './pypi.js';
 import type { Ctx, Handler, PackageConfig } from '../types.js';
 
 const PKG: PackageConfig = {
@@ -34,7 +33,6 @@ const CTX: Ctx = {
 };
 
 describe.each([
-  ['pypi', pypi, /#17/],
   ['npm', npm, /#18 \/ #19/],
 ] as const)('%s stub', (_name, handler: Handler, expectedIssue) => {
   it('isPublished throws a not-implemented error pointing at the follow-up issue', () => {
