@@ -1,0 +1,58 @@
+# CLI reference
+
+`putitoutthere` is the CLI shipped with the npm package.
+
+## Commands
+
+### `putitoutthere init`
+
+Scaffold a fresh repo.
+
+```
+putitoutthere init [--cwd <path>] [--cadence immediate|scheduled] [--force] [--json]
+```
+
+Writes `putitoutthere.toml`, `putitoutthere/AGENTS.md`, `.github/workflows/release.yml`, `.github/workflows/putitoutthere-check.yml`. Appends `@putitoutthere/AGENTS.md` to `CLAUDE.md`.
+
+### `putitoutthere plan`
+
+Compute the release plan. Emits a JSON matrix that the `build` job consumes.
+
+```
+putitoutthere plan [--cwd <path>] [--config <path>] [--json]
+```
+
+When `$GITHUB_OUTPUT` is set (CI), writes `matrix=<JSON>` to it.
+
+### `putitoutthere publish`
+
+Execute the plan.
+
+```
+putitoutthere publish [--cwd <path>] [--config <path>] [--dry-run] [--json]
+```
+
+Flow: re-run plan → preflight auth → completeness → toposort → per package `writeVersion` + `handler.publish` + git tag + push.
+
+### `putitoutthere doctor`
+
+Validate config + per-package auth. Returns a report (0 on clean, 1 on issues).
+
+```
+putitoutthere doctor [--cwd <path>] [--config <path>] [--json]
+```
+
+### `putitoutthere version`
+
+Print the CLI version.
+
+## Global flags
+
+| Flag                  | Description                                       |
+|-----------------------|---------------------------------------------------|
+| `--cwd <path>`        | Working directory. Default: `process.cwd()`.      |
+| `--config <path>`     | Path to `putitoutthere.toml`.                     |
+| `--json`              | Machine-readable output.                          |
+| `--dry-run`           | (publish) Skip side effects.                      |
+| `--force`             | (init) Overwrite `putitoutthere.toml`.            |
+| `--cadence <mode>`    | (init) `immediate` (default) or `scheduled`.      |

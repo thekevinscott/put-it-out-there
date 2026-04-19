@@ -1,0 +1,53 @@
+name: Link check
+
+# Catches link rot in README + plan docs. Runs on PR (docs-only diff)
+# and scheduled weekly so external links that die don't accumulate
+# silently.
+
+on:
+  pull_request:
+    paths:
+      - '**/*.md'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.md'
+  schedule:
+    - cron: '0 5 * * 1' # 05:00 UTC Monday
+
+concurrency:
+  group: link-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lychee:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          # Excludes:
+          #   - CLAUDE.md @-imports (file paths, not URLs)
+          #   - claude.ai code-session reference URLs (auth-walled)
+          #   - GitHub issue/PR self-refs (rate-limit + churn noise)
+          #   - URLs containing template placeholders like `<your-package>` --
+          #     these appear in setup walkthroughs and are intentionally not
+          #     real fetchable URLs.
+          args: >-
+            --no-progress
+            --verbose
+            --exclude '^@.+'
+            --exclude 'https://claude\.ai/code/'
+            --exclude 'https://github\.com/thekevinscott/put-it-out-there/issues/\d+'
+            --exclude 'https://github\.com/thekevinscott/put-it-out-there/pull/\d+'
+            --exclude '<[^>]+>'
+            --exclude-path 'notes/4-17-2026-initial-plan/transcript.md'
+            --exclude-path 'docs/'
+            --accept '200,203,206,403,429'
+            './**/*.md'
+          fail: true
+          token: ${{ secrets.GITHUB_TOKEN }}
