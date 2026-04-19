@@ -1,12 +1,27 @@
-# Canary fixture for E2E runs. Publishes to the piot-fixture-zzz-* family.
-# See test/e2e/README.md.
+# Canary fixture for E2E runs. Publishes to the piot-fixture-zzz-* family
+# on all three registries (crates.io, PyPI, npm). See test/e2e/README.md.
 
 [putitoutthere]
 version = 1
 
 [[package]]
+name = "piot-fixture-zzz-rust"
+kind = "crates"
+path = "rust"
+paths = ["rust/**"]
+first_version = "__VERSION__"
+
+[[package]]
+name = "piot-fixture-zzz-python"
+kind = "pypi"
+path = "python"
+paths = ["python/**"]
+build = "hatch"
+first_version = "__VERSION__"
+
+[[package]]
 name = "piot-fixture-zzz-cli"
 kind = "npm"
-path = "."
-paths = ["**"]
+path = "npm"
+paths = ["npm/**"]
 first_version = "__VERSION__"
