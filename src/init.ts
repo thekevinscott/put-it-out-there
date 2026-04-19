@@ -12,11 +12,13 @@
  * - Existing workflow → rename to `.bak` before writing.
  * - Existing `CLAUDE.md` already containing the import line → skip the append.
  *
- * Issue #20. Plan: §17.
+ * Issue #20 / #25. Plan: §9, §17.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+
+import { AGENTS_MD, CHECK_YML, releaseYml, TOML_SKELETON, type Cadence } from './templates.js';
 
 export interface InitOptions {
   cwd: string;
@@ -24,6 +26,8 @@ export interface InitOptions {
   force?: boolean;
   /** Reserved for v0.1. Only `claude` supported today. */
   agent?: 'claude' | 'cursor';
+  /** Release cadence; selects which release.yml template to emit. */
+  cadence?: Cadence;
 }
 
 export interface InitResult {
@@ -36,6 +40,7 @@ export function init(opts: InitOptions): InitResult {
   const cwd = opts.cwd;
   const force = Boolean(opts.force);
   const agent = opts.agent ?? 'claude';
+  const cadence: Cadence = opts.cadence ?? 'immediate';
   const result: InitResult = { wrote: [], skipped: [], backedUp: [] };
 
   // 1. putitoutthere.toml
@@ -82,7 +87,7 @@ export function init(opts: InitOptions): InitResult {
   /* v8 ignore stop */
 
   // 4. Workflows
-  writeWorkflow(cwd, 'release.yml', RELEASE_YML, result);
+  writeWorkflow(cwd, 'release.yml', releaseYml(cadence), result);
   writeWorkflow(cwd, 'putitoutthere-check.yml', CHECK_YML, result);
 
   return result;
@@ -105,136 +110,3 @@ function writeAtomic(path: string, contents: string): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, contents, 'utf8');
 }
-
-/* ---------------------------- templates ---------------------------- */
-
-const TOML_SKELETON = `# Put It Out There — release orchestration config.
-# Docs: https://github.com/thekevinscott/put-it-out-there
-#
-# Declare one [[package]] block per releasable artifact. Example:
-#
-# [[package]]
-# name = "my-crate"
-# kind = "crates"
-# path = "crates/my-crate"
-# paths = ["crates/my-crate/**", "Cargo.toml", "Cargo.lock"]
-# first_version = "0.1.0"
-
-version = 1
-`;
-
-const AGENTS_MD = `# Release signaling for Put It Out There
-
-When you finish a unit of work and are preparing a PR or commit, add a git
-trailer to the commit message body to signal a release:
-
-    release: <patch|minor|major|skip>
-
-Rules:
-- Omit the trailer for docs-only, CI-only, or internal-only changes.
-- \`patch\` for bug fixes or internal refactors that don't change public API.
-- \`minor\` for new features that are backwards-compatible.
-- \`major\` for breaking changes.
-- \`skip\` to suppress release when path filters would otherwise cascade.
-
-The trailer on the merge commit determines the release. If merging via
-"Squash and merge," include the trailer in the PR description so it ends up
-in the squashed commit body.
-
-## Scoping a release to specific packages
-
-To release a subset of packages in a polyglot repo, append a bracketed list:
-
-    release: minor [dirsql-rust, dirsql-python]
-
-Packages named in the list are bumped with the specified version. Other
-packages cascaded by path filters still get a \`patch\`. Packages in the
-list that *aren't* cascaded are force-included.
-`;
-
-const RELEASE_YML = `name: Release
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Dry-run: compute plan, skip publish + tag'
-        type: boolean
-        default: false
-
-concurrency:
-  group: release
-  cancel-in-progress: false
-
-permissions:
-  contents: write
-  id-token: write
-
-jobs:
-  plan:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: \${{ steps.plan.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - id: plan
-        name: putitoutthere plan
-        uses: thekevinscott/put-it-out-there@v0
-        with:
-          command: plan
-
-  publish:
-    needs: plan
-    if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
-    runs-on: \${{ matrix.runs_on }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include: \${{ fromJSON(needs.plan.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-      - name: putitoutthere publish
-        uses: thekevinscott/put-it-out-there@v0
-        with:
-          command: publish
-          dry_run: \${{ inputs.dry_run || 'false' }}
-`;
-
-const CHECK_YML = `name: Putitoutthere check (PR dry-run)
-
-on:
-  pull_request:
-    branches: [main]
-
-permissions:
-  contents: read
-  pull-requests: read
-
-jobs:
-  dry-run:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: putitoutthere plan (dry-run)
-        uses: thekevinscott/put-it-out-there@v0
-        with:
-          command: plan
-`;

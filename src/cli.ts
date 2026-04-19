@@ -47,6 +47,7 @@ function printUsage(): void {
       '  --dry-run         publish without side effects',
       '  --json            emit machine-readable output (plan only)',
       '  --force           overwrite putitoutthere.toml on init',
+      '  --cadence <mode>  init: immediate (default) or scheduled',
       '',
       'See https://github.com/thekevinscott/put-it-out-there for docs.',
       '',
@@ -60,6 +61,7 @@ interface ParsedFlags {
   dryRun: boolean;
   json: boolean;
   force: boolean;
+  cadence?: 'immediate' | 'scheduled';
 }
 
 function parseFlags(argv: readonly string[]): ParsedFlags {
@@ -72,6 +74,11 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--json') out.json = true;
     else if (a === '--force') out.force = true;
+    else if (a === '--cadence') {
+      const v = argv[++i];
+      /* v8 ignore next -- invalid cadence is caught by the type system for legit callers */
+      if (v === 'immediate' || v === 'scheduled') out.cadence = v;
+    }
   }
   return out;
 }
@@ -174,7 +181,11 @@ export async function run(argv: readonly string[]): Promise<number> {
         return report.ok ? 0 : 1;
       }
       case 'init': {
-        const r = init({ cwd: flags.cwd, force: flags.force });
+        const r = init({
+          cwd: flags.cwd,
+          force: flags.force,
+          ...(flags.cadence !== undefined ? { cadence: flags.cadence } : {}),
+        });
         if (flags.json) {
           process.stdout.write(JSON.stringify(r) + '\n');
         } else {

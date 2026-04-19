@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -73,6 +73,20 @@ describe('cli', () => {
       const out = stdoutChunks.join('');
       expect(out).toMatch(/backed up .+release\.yml/);
       expect(out).toMatch(/skipped.+putitoutthere\.toml/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('init --cadence=scheduled emits the cron release.yml', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-init-sched-'));
+    try {
+      const code = await run([
+        'node', 'putitoutthere', 'init', '--cwd', dir, '--cadence', 'scheduled',
+      ]);
+      expect(code).toBe(0);
+      const y = readFileSync(join(dir, '.github', 'workflows', 'release.yml'), 'utf8');
+      expect(y).toContain("cron: '0 2 * * *'");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
