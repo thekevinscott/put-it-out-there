@@ -1,21 +1,29 @@
 name: E2E
 
 # E2E tests publish to the piot-fixture-zzz-* canary family on
-# real registries (npm, PyPI, crates.io). Gated to workflow_dispatch
-# only: they cost real API calls, produce real artifacts, and are meant
-# to be run manually when we want to verify end-to-end.
+# real registries (npm, PyPI, crates.io). `canaryVersion()` emits
+# monotonic 0.0.{unix_seconds} slots so runs never collide on the
+# immutable crates.io publish rule.
 #
-# Default dispatch: dry-run only (no actual publishing).
-# Set `publish=true` in the dispatch UI to flip PIOT_E2E_PUBLISH=1 and
-# publish for real. See test/e2e/README.md.
+# Triggers:
+# - push to main → publish for real (continuous dogfood).
+# - pull_request → dry-run only (no side effects).
+# - workflow_dispatch → operator choice; defaults to dry-run.
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
     inputs:
       publish:
         description: "Actually publish canary versions to real registries"
         type: boolean
         default: false
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   e2e:
@@ -53,15 +61,24 @@ jobs:
       #   fallback stays wired up for the first canary publish (crates.io
       #   trusted publishing requires crate ownership, i.e. an existing
       #   crate).
+      - name: Decide publish mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.publish }}" = "true" ]; then
+            echo "publish=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=0" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: crates.io OIDC token exchange
-        if: inputs.publish
+        if: steps.mode.outputs.publish == '1'
         uses: rust-lang/crates-io-auth-action@v1
         id: crates-auth
         continue-on-error: true
 
       - name: Run e2e suite
         env:
-          PIOT_E2E_PUBLISH: ${{ inputs.publish && '1' || '0' }}
+          PIOT_E2E_PUBLISH: ${{ steps.mode.outputs.publish }}
           # npm: OIDC auto-detected; token fallback for bootstrap.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           # PyPI: via pending publisher; token fallback if needed.

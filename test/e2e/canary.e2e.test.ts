@@ -40,14 +40,16 @@ describe('canaryVersion', () => {
 });
 
 describe('e2e: plan', () => {
-  it('emits a single npm-vanilla row for the canary fixture', () => {
+  it('emits one row per registry (crates, pypi, npm) for the canary fixture', () => {
     const out = runPiot(['plan', '--json'], repo.cwd);
     const matrix = JSON.parse(out.trim()) as Array<{ name: string; kind: string; target: string; version: string }>;
-    expect(matrix).toHaveLength(1);
-    expect(matrix[0]!.name).toBe('piot-fixture-zzz-cli');
-    expect(matrix[0]!.kind).toBe('npm');
-    expect(matrix[0]!.target).toBe('noarch');
-    expect(matrix[0]!.version).toBe(repo.version);
+    const byKind = new Map(matrix.map((r) => [r.kind, r]));
+    expect(byKind.get('crates')?.name).toBe('piot-fixture-zzz-rust');
+    expect(byKind.get('pypi')?.name).toBe('piot-fixture-zzz-python');
+    expect(byKind.get('npm')?.name).toBe('piot-fixture-zzz-cli');
+    for (const row of matrix) {
+      expect(row.version).toBe(repo.version);
+    }
   });
 });
 
@@ -55,27 +57,33 @@ describe('e2e: publish --dry-run', () => {
   it('runs without side effects (auth presence is enough to pass pre-flight)', () => {
     const out = runPiot(['publish', '--dry-run', '--json'], repo.cwd, {
       NODE_AUTH_TOKEN: 'e2e-dry-run-placeholder',
+      PYPI_API_TOKEN: 'e2e-dry-run-placeholder',
+      CARGO_REGISTRY_TOKEN: 'e2e-dry-run-placeholder',
     });
     const result = JSON.parse(out.trim()) as { ok: boolean; published: unknown[] };
     expect(result.ok).toBe(true);
-    // dry-run emits a `skipped` entry; registry not touched.
-    expect(result.published).toHaveLength(1);
+    // dry-run emits one `skipped` entry per declared package; registries not touched.
+    expect(result.published.length).toBeGreaterThanOrEqual(3);
   });
 });
 
 describe('e2e: publish (live registry)', () => {
   it.skipIf(!shouldActuallyPublish())(
-    'publishes to npm and creates a tag (requires PIOT_E2E_PUBLISH=1)',
+    'publishes to all three registries and creates tags (requires PIOT_E2E_PUBLISH=1)',
     () => {
       const out = runPiot(['publish', '--json'], repo.cwd, {
         NODE_AUTH_TOKEN: process.env.NPM_TOKEN ?? '',
+        PYPI_API_TOKEN: process.env.PYPI_API_TOKEN ?? '',
+        CARGO_REGISTRY_TOKEN: process.env.CARGO_REGISTRY_TOKEN ?? '',
       });
       const result = JSON.parse(out.trim()) as {
         ok: boolean;
         published: Array<{ package: string; version: string; result: { status: string } }>;
       };
       expect(result.ok).toBe(true);
-      expect(result.published[0]!.result.status).toMatch(/published|already-published/);
+      for (const entry of result.published) {
+        expect(entry.result.status).toMatch(/published|already-published/);
+      }
     },
   );
 });

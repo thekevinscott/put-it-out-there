@@ -9,7 +9,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -82,19 +82,30 @@ export function shouldActuallyPublish(): boolean {
 
 /* ---------------------------- internals ---------------------------- */
 
+const PLACEHOLDER_FILENAMES = new Set([
+  'putitoutthere.toml',
+  'package.json',
+  'Cargo.toml',
+  'pyproject.toml',
+]);
+
 function rewritePlaceholders(cwd: string, version: string): void {
-  rewriteFile(join(cwd, 'putitoutthere.toml'), version);
-  rewriteFile(join(cwd, 'package.json'), version);
-  rewriteFile(join(cwd, 'Cargo.toml'), version);
-  rewriteFile(join(cwd, 'pyproject.toml'), version);
+  for (const path of walkManifests(cwd)) {
+    const raw = readFileSync(path, 'utf8');
+    if (raw.includes('__VERSION__')) {
+      writeFileSync(path, raw.replaceAll('__VERSION__', version), 'utf8');
+    }
+  }
 }
 
-function rewriteFile(path: string, version: string): void {
-  try {
-    const raw = readFileSync(path, 'utf8');
-    writeFileSync(path, raw.replaceAll('__VERSION__', version), 'utf8');
-    /* v8 ignore next 2 -- not every fixture has every file */
-  } catch {
-    // File missing. Skip.
+function* walkManifests(dir: string): Generator<string> {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    const st = statSync(full);
+    if (st.isDirectory()) {
+      yield* walkManifests(full);
+    } else if (PLACEHOLDER_FILENAMES.has(entry)) {
+      yield full;
+    }
   }
 }
