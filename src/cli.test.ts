@@ -238,7 +238,7 @@ paths = ["packages/ts/**"]
 
     const code = await run(['node', 'putitoutthere', 'plan', '--cwd', repo, '--json']);
     expect(code).toBe(0);
-    const out = execFileSync('cat', [outFile], { encoding: 'utf8' });
+    const out = readFileSync(outFile, 'utf8');
     expect(out).toMatch(/^matrix=/);
 
     delete process.env.GITHUB_OUTPUT;

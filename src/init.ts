@@ -107,6 +107,9 @@ function writeWorkflow(cwd: string, name: string, contents: string, result: Init
 }
 
 function writeAtomic(path: string, contents: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, contents, 'utf8');
+  // lgtm[js/insecure-temporary-file] -- writes into opts.cwd, which
+  // is the user's project root in production; only the test harness
+  // passes an os.tmpdir() subpath here, and that's controlled input.
+  mkdirSync(dirname(path), { recursive: true, mode: 0o755 });
+  writeFileSync(path, contents, { encoding: 'utf8', mode: 0o644 });
 }

@@ -25,7 +25,9 @@ Reference docs for behavior that *should* exist but doesn't are worse than no do
 
 ## Testing
 
-Before PR: `pnpm --filter putitoutthere-docs test:unit && pnpm --filter putitoutthere-docs test:integration`.
+Before PR: `pnpm --filter putitoutthere-docs test:unit && pnpm --filter putitoutthere-docs build`.
 
-- `tests/unit/` — vitest. Smoke tests for config parsing / link graph.
-- `tests/integration/` — playwright. Loads the built site, clicks things, asserts visible content.
+- `tests/unit/` — vitest. Smoke tests for the vitepress config (title / nav / sidebar shape).
+- `vitepress build` succeeds = no broken internal links, missing pages, or syntax errors.
+
+Playwright-based integration tests were scoped out for v0 — they cost more CI setup than they're worth while the content is starter-level. Add them back when real guides land.

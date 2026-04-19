@@ -19,7 +19,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
@@ -53,10 +53,16 @@ function writeVersionImpl(
   _ctx: Ctx,
 ): Promise<string[]> {
   const cargoPath = join(pkg.path, 'Cargo.toml');
-  if (!existsSync(cargoPath)) {
-    return Promise.reject(new Error(`Cargo.toml not found at ${cargoPath}`));
+  let original: string;
+  try {
+    original = readFileSync(cargoPath, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return Promise.reject(new Error(`Cargo.toml not found at ${cargoPath}`));
+    }
+    /* v8 ignore next -- non-ENOENT read errors are rare (perms/io); surface as-is */
+    return Promise.reject(err instanceof Error ? err : new Error(String(err)));
   }
-  const original = readFileSync(cargoPath, 'utf8');
   let updated: string;
   try {
     updated = replaceCargoVersion(original, version);

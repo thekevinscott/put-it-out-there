@@ -9,7 +9,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
@@ -47,10 +47,16 @@ function isPublishedImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<boolea
 
 function writeVersionImpl(pkg: NpmPkg, version: string, _ctx: Ctx): Promise<string[]> {
   const p = join(pkg.path, 'package.json');
-  if (!existsSync(p)) {
-    return Promise.reject(new Error(`package.json not found at ${p}`));
+  let original: string;
+  try {
+    original = readFileSync(p, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return Promise.reject(new Error(`package.json not found at ${p}`));
+    }
+    /* v8 ignore next -- non-ENOENT read errors surface as-is */
+    return Promise.reject(err instanceof Error ? err : new Error(String(err)));
   }
-  const original = readFileSync(p, 'utf8');
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(original) as Record<string, unknown>;

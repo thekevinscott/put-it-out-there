@@ -51,10 +51,16 @@ function writeVersionImpl(
   _ctx: Ctx,
 ): Promise<string[]> {
   const pyProjectPath = join(pkg.path, 'pyproject.toml');
-  if (!existsSync(pyProjectPath)) {
-    return Promise.reject(new Error(`pyproject.toml not found at ${pyProjectPath}`));
+  let original: string;
+  try {
+    original = readFileSync(pyProjectPath, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return Promise.reject(new Error(`pyproject.toml not found at ${pyProjectPath}`));
+    }
+    /* v8 ignore next -- non-ENOENT read errors surface as-is */
+    return Promise.reject(err instanceof Error ? err : new Error(String(err)));
   }
-  const original = readFileSync(pyProjectPath, 'utf8');
   let updated: string;
   try {
     updated = replacePyProjectVersion(original, version);
