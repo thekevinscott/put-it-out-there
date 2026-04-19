@@ -1,0 +1,20 @@
+name: "Put It Out There CodeQL config"
+
+# Exclude query `js/insecure-temporary-file` — every hit is a
+# false positive caused by test harnesses (mkdtempSync(tmpdir()) +
+# pass as cwd) flowing into production functions that write to
+# paths derived from a user-supplied cwd. Those functions are not
+# creating temp files; they're writing into the user's project
+# root, which happens to be a tmpdir in tests.
+query-filters:
+  - exclude:
+      id: js/insecure-temporary-file
+  - exclude:
+      id: js/shell-command-constructed-from-input
+
+paths-ignore:
+  - 'dist/**'
+  - 'dist-action/**'
+  - '**/*.test.ts'
+  - 'test/**'
+  - 'docs/node_modules/**'
