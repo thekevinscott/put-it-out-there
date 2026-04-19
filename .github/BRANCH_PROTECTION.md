@@ -61,6 +61,8 @@ must pass for CI Gate to go green:
 | TDD lint (tests required for `src/` changes) | `tdd-lint.yml` | ✓ |
 | Actionlint (workflow YAML) | `actionlint.yml` | ✓ (when workflow files change) |
 | CodeQL (security) | `codeql.yml` | ✓ |
+| Secret scan (gitleaks on full history) | `secret-scan.yml` | ✓ |
+| Link check (docs) | `link-check.yml` | ✓ (when docs change) |
 
 `e2e.yml` is `workflow_dispatch`-only by design (§23.4) and does not
 gate merge.
