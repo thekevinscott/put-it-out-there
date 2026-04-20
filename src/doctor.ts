@@ -74,8 +74,9 @@ export async function doctor(opts: DoctorOptions): Promise<DoctorReport> {
       const via = row?.via ?? 'missing';
       packages.push({ name: pkg.name, kind: pkg.kind, auth: via });
       if (via === 'missing') {
+        const vars = row?.acceptedEnvVars.join(' or ') ?? row?.envVar ?? '<env-var>';
         issues.push(
-          `auth: ${pkg.name} (${pkg.kind}) needs ${row?.envVar ?? '<env-var>'} or OIDC`,
+          `auth: ${pkg.name} (${pkg.kind}) needs ${vars} or OIDC`,
         );
       }
     }
