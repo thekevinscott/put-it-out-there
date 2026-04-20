@@ -181,6 +181,38 @@ describe('inspect — PyPI', () => {
     expect(isError(r)).toBe(true);
   });
 
+  it('errors on a bare "pypi-" token with empty body', () => {
+    const r = inspect({ token: 'pypi-' });
+    expect(isError(r) ? r.error : '').toMatch(/base64/);
+  });
+
+  it('decodes an unpadded base64 body', () => {
+    // Drop trailing '=' padding — some PyPI serializers have emitted
+    // both padded and unpadded bodies historically.
+    const padded = buildPypiToken({ version: 1, permissions: 'user', user: 'u-abc' }, []);
+    const stripped = 'pypi-' + padded.slice('pypi-'.length).replace(/=+$/, '');
+    const r = asPypi(inspect({ token: stripped }));
+    expect((r.identifier as Record<string, unknown>).user).toBe('u-abc');
+  });
+
+  it('skips unmatched braces and invalid-JSON blocks before real macaroon JSON', () => {
+    // Mix of hazards before the real identifier:
+    //   - a lone "{" that never closes -> findMatchingBrace returns -1
+    //   - a "{\x00}" block that balances but is not valid JSON -> JSON.parse catch path
+    //   - the real identifier carries an escaped quote in a string value -> backslash-escape
+    //     state in findMatchingBrace
+    const parts = [
+      Buffer.from([0x02]),
+      Buffer.from('{ no close here'),
+      Buffer.from([0x7b, 0x00, 0x7d]), // "{\x00}"
+      Buffer.from(JSON.stringify({ version: 1, permissions: 'user', note: 'a "b" c' })),
+      Buffer.from([0x04, 0x00]),
+    ];
+    const token = 'pypi-' + Buffer.concat(parts).toString('base64');
+    const r = asPypi(inspect({ token }));
+    expect(r.identifier).toEqual({ version: 1, permissions: 'user', note: 'a "b" c' });
+  });
+
   it('computes a stable sha256 digest prefix', () => {
     const token = buildPypiToken({ version: 1 }, []);
     const r1 = inspect({ token });
@@ -195,6 +227,12 @@ describe('inspect — npm placeholder', () => {
     if (isError(r) || r.registry !== 'npm') throw new Error('expected npm');
     expect(r.format).toBe('granular');
     expect(r.status).toBe('pending');
+  });
+
+  it('marks format=unknown when an opaque token is routed to npm via override', () => {
+    const r = inspect({ token: 'ci0deadbeef', registry: 'npm' });
+    if (isError(r) || r.registry !== 'npm') throw new Error('expected npm');
+    expect(r.format).toBe('unknown');
   });
 });
 

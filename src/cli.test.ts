@@ -594,6 +594,86 @@ paths = ["packages/ts/**"]
     expect(stderrChunks.join('')).toMatch(/missing subcommand/);
   });
 
+  it('token inspect: --registry override + restrictions render in human output', async () => {
+    const identifier = { version: 1, permissions: 'user', user: 'u-2' };
+    const caveat = { version: 1, projects: ['pkg-a'] };
+    const bytes = Buffer.concat([
+      Buffer.from([0x02]),
+      Buffer.from(JSON.stringify(identifier), 'utf8'),
+      Buffer.from([0x00, 0x01]),
+      Buffer.from(JSON.stringify(caveat), 'utf8'),
+    ]);
+    const token = 'pypi-' + bytes.toString('base64');
+
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+
+    const code = await run([
+      'node',
+      'putitoutthere',
+      'token',
+      'inspect',
+      '--token',
+      token,
+      '--registry',
+      'pypi',
+    ]);
+    expect(code).toBe(0);
+    const out = stdoutChunks.join('');
+    expect(out).toMatch(/restrictions:/);
+    expect(out).toMatch(/ProjectNames/);
+    expect(out).toMatch(/pkg-a/);
+  });
+
+  it('token inspect: surfaces a decode error on stderr and exits 1', async () => {
+    const stderrChunks: string[] = [];
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    // Base64 that decodes to non-macaroon bytes with no JSON blobs.
+    const token = 'pypi-' + Buffer.from('no json here').toString('base64');
+    const code = await run([
+      'node',
+      'putitoutthere',
+      'token',
+      'inspect',
+      '--token',
+      token,
+    ]);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/inspect failed/);
+  });
+
+  it('token inspect: prints status+note for an npm_ token placeholder', async () => {
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const code = await run([
+      'node',
+      'putitoutthere',
+      'token',
+      'inspect',
+      '--token',
+      'npm_abcdef0123456789',
+    ]);
+    expect(code).toBe(0);
+    const out = stdoutChunks.join('');
+    expect(out).toMatch(/registry: npm/);
+    expect(out).toMatch(/status:\s+pending/);
+    expect(out).toMatch(/note:/);
+  });
+
   it('token inspect: auto-reads the sole pypi token from env when --token omitted', async () => {
     const identifier = { version: 1, permissions: 'user', user: 'u-env' };
     const bytes = Buffer.concat([

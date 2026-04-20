@@ -123,7 +123,7 @@ function inspectPypi(token: string, digest: string): InspectResult {
     };
   }
 
-  const identifier = blobs[0] ?? null;
+  const identifier = blobs[0] as Record<string, unknown>;
   const caveatBlobs = blobs.slice(1);
   const restrictions = caveatBlobs.map(toRestriction);
   const expired = hasExpired(restrictions);
@@ -146,15 +146,9 @@ function inspectPypi(token: string, digest: string): InspectResult {
 function tryBase64Decode(s: string): Uint8Array | null {
   const normalized = s.replace(/-/g, '+').replace(/_/g, '/');
   const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
-  try {
-    const bin = Buffer.from(normalized + padding, 'base64');
-    /* v8 ignore next -- empty payloads are rejected earlier by caller; defensive */
-    if (bin.length === 0) return null;
-    return new Uint8Array(bin);
-  } catch {
-    /* v8 ignore next 2 -- Buffer.from with base64 does not throw on bad input */
-    return null;
-  }
+  const bin = Buffer.from(normalized + padding, 'base64');
+  if (bin.length === 0) return null;
+  return new Uint8Array(bin);
 }
 
 /**
