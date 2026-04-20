@@ -27,6 +27,7 @@ const AUTH_VARS = [
   'CARGO_REGISTRY_TOKEN',
   'PYPI_API_TOKEN',
   'NODE_AUTH_TOKEN',
+  'NPM_TOKEN',
 ];
 
 beforeEach(() => {
@@ -94,10 +95,21 @@ describe('checkAuth: per-handler requirements (§16.3 table)', () => {
     expect(checkAuth([pkg('npm')]).ok).toBe(true);
   });
 
+  it('npm: passes with NPM_TOKEN (community convention, #95)', () => {
+    process.env.NPM_TOKEN = 'tok';
+    expect(checkAuth([pkg('npm')]).ok).toBe(true);
+  });
+
   it('npm: fails with neither', () => {
     const status = checkAuth([pkg('npm')]);
     expect(status.ok).toBe(false);
-    expect(status.results[0]!.envVar).toBe('NODE_AUTH_TOKEN');
+    expect(status.results[0]!.envVar).toBe('NODE_AUTH_TOKEN or NPM_TOKEN');
+  });
+
+  it('npm: empty NODE_AUTH_TOKEN falls through to NPM_TOKEN', () => {
+    process.env.NODE_AUTH_TOKEN = '';
+    process.env.NPM_TOKEN = 'tok';
+    expect(checkAuth([pkg('npm')]).ok).toBe(true);
   });
 });
 
@@ -131,7 +143,7 @@ describe('checkAuth: multi-package rollup', () => {
     const missing = status.results.filter((r) => r.via === 'missing');
     expect(missing.map((r) => r.envVar).sort()).toEqual([
       'CARGO_REGISTRY_TOKEN',
-      'NODE_AUTH_TOKEN',
+      'NODE_AUTH_TOKEN or NPM_TOKEN',
       'PYPI_API_TOKEN',
     ]);
   });

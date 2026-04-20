@@ -135,6 +135,9 @@ const PUBLISH_JOB = `  publish:
           command: publish
           dry_run: \${{ inputs.dry_run || 'false' }}
         env:
+          # setup-node writes an .npmrc that references \${NODE_AUTH_TOKEN},
+          # so that's the name npm reads at publish time. putitoutthere also
+          # accepts NPM_TOKEN (#95) — pick whichever matches your .npmrc.
           NODE_AUTH_TOKEN: \${{ secrets.NPM_TOKEN }}
           CARGO_REGISTRY_TOKEN: \${{ secrets.CARGO_TOKEN }}
           PYPI_API_TOKEN: \${{ secrets.PYPI_API_TOKEN }}

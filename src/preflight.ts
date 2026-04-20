@@ -17,10 +17,13 @@
 import type { Package } from './config.js';
 import type { Kind } from './types.js';
 
-const TOKEN_ENV: Record<Kind, string> = {
-  crates: 'CARGO_REGISTRY_TOKEN',
-  pypi: 'PYPI_API_TOKEN',
-  npm: 'NODE_AUTH_TOKEN',
+// Each kind lists the env vars we accept, in priority order. `npm` accepts
+// both `NODE_AUTH_TOKEN` (the setup-node idiom) and `NPM_TOKEN` (the common
+// community convention) — see #95.
+const TOKEN_ENV: Record<Kind, readonly string[]> = {
+  crates: ['CARGO_REGISTRY_TOKEN'],
+  pypi: ['PYPI_API_TOKEN'],
+  npm: ['NODE_AUTH_TOKEN', 'NPM_TOKEN'],
 };
 
 const OIDC_ENV = 'ACTIONS_ID_TOKEN_REQUEST_TOKEN';
@@ -30,7 +33,8 @@ export interface AuthResult {
   package: string;
   kind: Kind;
   via: 'oidc' | 'token' | 'missing';
-  envVar: string; // always the expected token env var for this kind
+  /** Display name of the token env var(s) for this kind, e.g. `NODE_AUTH_TOKEN or NPM_TOKEN`. */
+  envVar: string;
 }
 
 export interface AuthStatus {
@@ -41,11 +45,12 @@ export interface AuthStatus {
 export function checkAuth(packages: readonly Package[]): AuthStatus {
   const hasOidc = nonEmpty(process.env[OIDC_ENV]);
   const results: AuthResult[] = packages.map((p) => {
-    const envVar = TOKEN_ENV[p.kind];
+    const accepted = TOKEN_ENV[p.kind];
+    const envVar = accepted.join(' or ');
     if (hasOidc) {
       return { package: p.name, kind: p.kind, via: 'oidc', envVar };
     }
-    if (nonEmpty(process.env[envVar])) {
+    if (accepted.some((name) => nonEmpty(process.env[name]))) {
       return { package: p.name, kind: p.kind, via: 'token', envVar };
     }
     return { package: p.name, kind: p.kind, via: 'missing', envVar };
