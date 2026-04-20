@@ -82,7 +82,7 @@ describe('e2e: publish (live registry)', () => {
       // See harness.stageArtifacts for the per-kind details.
       stageArtifacts(repo);
       const out = runPiot(['publish', '--json'], repo.cwd, {
-        NODE_AUTH_TOKEN: process.env.NPM_TOKEN ?? '',
+        NODE_AUTH_TOKEN: process.env.NODE_AUTH_TOKEN ?? '',
         PYPI_API_TOKEN: process.env.PYPI_API_TOKEN ?? '',
         CARGO_REGISTRY_TOKEN: process.env.CARGO_REGISTRY_TOKEN ?? '',
       });
