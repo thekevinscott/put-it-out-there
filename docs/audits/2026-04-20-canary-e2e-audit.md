@@ -35,20 +35,22 @@ Compounding friction:
 - **PyPI error message was misleading.** "PYPI_API_TOKEN not set" sent me hunting for secrets configuration when the real gap was an OIDC exchange.
 - **No post-merge CI webhook.** PR webhooks cover PR-scoped checks only; to see the push-to-main E2E outcome I had to WebFetch the Actions HTML (timestamps hidden, pagination stubbed).
 
-## npm current failure
+## npm current failure — resolved
 
-Most recent post-merge E2E run ([24650221315](https://github.com/thekevinscott/put-it-out-there/actions/runs/24650221315)):
+**Root cause**: `test/e2e/canary.e2e.test.ts:85` read `process.env.NPM_TOKEN`, but `.github/workflows/e2e.yml:100` exposes the secret as `NODE_AUTH_TOKEN` (the `actions/setup-node@v4` convention). The `?? ''` fallback passed an empty string to `runPiot`, whose `{ ...process.env, ...env }` spread overwrote the real token the CLI would have inherited. `npm publish` saw no auth → `need auth` error.
 
-```
-npm error need auth  This command requires you to be logged in to https://registry.npmjs.org/
-```
+Crates + PyPI were unaffected because their env var names (`PYPI_API_TOKEN`, `CARGO_REGISTRY_TOKEN`) match across workflow and test.
 
-Two plausible causes, neither fully confirmed:
+Fixed in #96 (one-character change). Tracked issue #95 captures the broader concern: the npm handler's preflight should accept both `NODE_AUTH_TOKEN` and `NPM_TOKEN` so adopters who follow the `NPM_TOKEN: ${{ secrets.NPM_TOKEN }}` step-level convention don't get a misleading preflight error.
 
-1. **`NPM_TOKEN` secret not present in the `e2e` environment** (most likely). `.github/workflows/e2e.yml:100` reads `secrets.NPM_TOKEN`; no earlier run has successfully published to npm, which suggests the secret was never wired. `actions/setup-node@v4` writes `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into `.npmrc`; if `NODE_AUTH_TOKEN` is empty, `npm publish` gets no creds.
-2. **npm trusted-publishing bootstrapping paradox.** The workflow comment (`e2e.yml:63-66`) notes that npm's trusted publishing only works *after the package already exists on the registry*. For the first canary publish of `piot-fixture-zzz-cli`, we unavoidably need a token — but it isn't there.
+### Diagnostic detour
 
-**Unresolved gap:** the successful publishes of `piot-fixture-zzz-rust@0.0.1776663346` (crates.io) and `piot-fixture-zzz-python@0.0.1776663346` (PyPI) both carry a unix timestamp of 06:55:46 UTC. The post-merge E2E run I inspected (run 24650221315) completed at 05:34 UTC. So *some later workflow run* actually produced these publishes, but the Actions listing I could reach via WebFetch didn't surface it (timestamps hidden). A local `gh run list --workflow=e2e.yml --branch=main --limit 20` would close this loop.
+Before finding the actual cause, I hypothesized two wrong things:
+
+1. `NPM_TOKEN` secret missing from the `e2e` environment. (User confirmed it was set.)
+2. `setup-node`'s `.npmrc` location being unreachable from the temp cwd. (Wrong — `setup-node@v4` writes to `$RUNNER_TEMP/.npmrc` and exports `NPM_CONFIG_USERCONFIG`, so npm finds it from any cwd.)
+
+Both were plausible given the error message; neither were the actual bug. A `preflight --all` that reported "NODE_AUTH_TOKEN present in env = true" would have short-circuited this detour immediately.
 
 ## Catalogue — generalized issues for future libraries
 
