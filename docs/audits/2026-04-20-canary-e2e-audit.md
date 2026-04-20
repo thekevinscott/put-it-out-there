@@ -41,7 +41,7 @@ Compounding friction:
 
 Crates + PyPI were unaffected because their env var names (`PYPI_API_TOKEN`, `CARGO_REGISTRY_TOKEN`) match across workflow and test.
 
-Fixed in #96 (one-character change). Tracked issue #95 captures the broader concern: the npm handler's preflight should accept both `NODE_AUTH_TOKEN` and `NPM_TOKEN` so adopters who follow the `NPM_TOKEN: ${{ secrets.NPM_TOKEN }}` step-level convention don't get a misleading preflight error.
+Fixed in #96 (one-character change). Tracked issue #95 captures the broader concern: the npm handler's preflight should accept both `NODE_AUTH_TOKEN` and `NPM_TOKEN` so adopters who expose the secret under the name `NPM_TOKEN` at the step level don't get a misleading preflight error.
 
 ### Diagnostic detour
 
