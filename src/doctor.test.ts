@@ -218,3 +218,88 @@ first_version = "0.1.0"
     expect(result.artifacts).toBeUndefined();
   });
 });
+
+describe('doctor --deep', () => {
+  it('flags a PyPI scope mismatch as an issue', async () => {
+    writeCfg(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "ship-me"
+kind  = "pypi"
+path  = "packages/py"
+paths = ["packages/py/**"]
+`);
+    process.env.PYPI_API_TOKEN = 'pypi-fake';
+    mkdirSync(join(repo, 'packages/py'), { recursive: true });
+
+    const result = await doctor({
+      cwd: repo,
+      deep: true,
+      inspectFn: () => Promise.resolve({
+        registry: 'pypi',
+        source_digest: 'abc',
+        format: 'macaroon',
+        identifier: { user: 'u-1' },
+        restrictions: [{ type: 'ProjectNames', names: ['other-pkg'] }],
+        expired: false,
+      }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((i) => /scope:.+ship-me/.test(i))).toBe(true);
+    const entry = result.packages.find((p) => p.name === 'ship-me');
+    expect(entry?.scope_match).toBe('mismatch');
+    expect(entry?.scope).toContain('other-pkg');
+  });
+
+  it('passes when scope matches the config', async () => {
+    writeCfg(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "ship-me"
+kind  = "pypi"
+path  = "packages/py"
+paths = ["packages/py/**"]
+`);
+    process.env.PYPI_API_TOKEN = 'pypi-fake';
+    mkdirSync(join(repo, 'packages/py'), { recursive: true });
+
+    const result = await doctor({
+      cwd: repo,
+      deep: true,
+      inspectFn: () => Promise.resolve({
+        registry: 'pypi',
+        source_digest: 'abc',
+        format: 'macaroon',
+        identifier: { user: 'u-1' },
+        restrictions: [{ type: 'ProjectNames', names: ['ship-me'] }],
+        expired: false,
+      }),
+    });
+    expect(result.ok).toBe(true);
+    const entry = result.packages.find((p) => p.name === 'ship-me');
+    expect(entry?.scope_match).toBe('ok');
+  });
+
+  it('skips packages without a resolvable token (auth=missing)', async () => {
+    writeCfg(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "ship-me"
+kind  = "pypi"
+path  = "packages/py"
+paths = ["packages/py/**"]
+`);
+    // No PYPI_API_TOKEN set. `--deep` should not call inspect at all, and
+    // scope should not be populated.
+    const result = await doctor({
+      cwd: repo,
+      deep: true,
+      inspectFn: () => Promise.reject(new Error('inspect should not be called when auth is missing')),
+    });
+    const entry = result.packages.find((p) => p.name === 'ship-me');
+    expect(entry?.scope).toBeUndefined();
+  });
+});

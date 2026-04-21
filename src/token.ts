@@ -16,6 +16,8 @@
 
 import { createHash } from 'node:crypto';
 
+import { loadConfig, type Package } from './config.js';
+
 export type Registry = 'pypi' | 'npm' | 'crates';
 
 export interface InspectOptions {
@@ -568,4 +570,81 @@ function normalizeCratesRow(row: Record<string, unknown>): CratesTokenRow {
       : null,
     expired_at: typeof row.expired_at === 'string' ? row.expired_at : null,
   };
+}
+
+// ---- token list -------------------------------------------------------
+
+export interface TokenListRow {
+  registry: Registry;
+  source: 'env';
+  name: string;
+  details: string;
+}
+
+export interface TokenListOptions {
+  /** Working dir used to locate putitoutthere.toml when no `packages` is passed. */
+  cwd?: string;
+  configPath?: string;
+  /** Env to scan. Defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
+  /**
+   * Override the packages list (skips config load). Tests pass this
+   * directly; the CLI path loads it from disk.
+   */
+  packages?: readonly Package[];
+}
+
+// Crates has no identifying prefix, so we only classify an opaque env var
+// as crates when its *name* is the one the crates handler reads. Kept in
+// sync with src/preflight.ts TOKEN_ENV['crates'].
+const CRATES_ENV_NAMES: ReadonlySet<string> = new Set(['CARGO_REGISTRY_TOKEN']);
+
+/**
+ * Enumerate registry tokens discoverable to the CLI from the environment.
+ *
+ * Classification is by *value format*:
+ *   - `pypi-` prefix → PyPI macaroon
+ *   - `npm_`  prefix → npm granular
+ *   - opaque value under a crates-recognized env var, iff the config has a
+ *     crates package → crates.io
+ *
+ * Token values are never returned or logged.
+ *
+ * Issue #106. Ships env-only; `--secrets` (repo/env/org secret listing via
+ * the stored GitHub user access token) is gated on #105.
+ */
+export function tokenList(opts: TokenListOptions = {}): TokenListRow[] {
+  const env = opts.env ?? process.env;
+  const packages = resolvePackages(opts);
+  const hasCrates = packages.some((p) => p.kind === 'crates');
+
+  const rows: TokenListRow[] = [];
+  for (const [name, raw] of Object.entries(env)) {
+    if (typeof raw !== 'string') continue;
+    const value = raw.trim();
+    if (value === '') continue;
+    if (value.startsWith('pypi-')) {
+      rows.push({ registry: 'pypi', source: 'env', name, details: 'pypi- prefix, macaroon' });
+    } else if (value.startsWith('npm_')) {
+      rows.push({ registry: 'npm', source: 'env', name, details: 'npm_ prefix (granular)' });
+    } else if (hasCrates && CRATES_ENV_NAMES.has(name)) {
+      rows.push({ registry: 'crates', source: 'env', name, details: 'opaque (from config)' });
+    }
+    // anything else: ignored. We never dump the full environment.
+  }
+  rows.sort((a, b) => (a.registry === b.registry ? a.name.localeCompare(b.name) : a.registry.localeCompare(b.registry)));
+  return rows;
+}
+
+function resolvePackages(opts: TokenListOptions): readonly Package[] {
+  if (opts.packages !== undefined) return opts.packages;
+  const cwd = opts.cwd ?? process.cwd();
+  const cfgPath = opts.configPath ?? `${cwd.replace(/\/+$/, '')}/putitoutthere.toml`;
+  try {
+    return loadConfig(cfgPath).packages;
+  } catch {
+    // No config / unreadable config → env-only, prefix-based classification
+    // still works. Crates opaque-tokens are skipped (no config to key on).
+    return [];
+  }
 }

@@ -682,6 +682,141 @@ paths = ["packages/ts/**"]
     }
   });
 
+  it('doctor --deep: renders scope suffix and scope_match badge in the human table', async () => {
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const dir = mkdtempSync(join(tmpdir(), 'cli-doctor-deep-'));
+    mkdirSync(join(dir, 'packages/py'), { recursive: true });
+    writeFileSync(
+      join(dir, 'putitoutthere.toml'),
+      `[putitoutthere]
+version = 1
+[[package]]
+name  = "ship-me"
+kind  = "pypi"
+path  = "packages/py"
+paths = ["packages/py/**"]
+`,
+      'utf8',
+    );
+    const prev = process.env.PYPI_API_TOKEN;
+    // Synthetic token whose pypi-base64 payload carries a ProjectNames
+    // caveat scoped to "other-pkg" (not "ship-me"). The doctor arm
+    // resolves via env, calls the *real* inspect (offline, pure decode),
+    // and surfaces a scope mismatch in the rendered table.
+    const identifier = { version: 1, permissions: 'user', user: 'u-1' };
+    const caveat = { version: 1, projects: ['other-pkg'] };
+    const bytes = Buffer.concat([
+      Buffer.from([0x02]),
+      Buffer.from(JSON.stringify(identifier), 'utf8'),
+      Buffer.from([0x00, 0x01]),
+      Buffer.from(JSON.stringify(caveat), 'utf8'),
+    ]);
+    process.env.PYPI_API_TOKEN = 'pypi-' + bytes.toString('base64');
+
+    try {
+      const code = await run(['node', 'putitoutthere', 'doctor', '--cwd', dir, '--deep']);
+      expect(code).toBe(1); // mismatch → issues → ok:false
+      const out = stdoutChunks.join('');
+      expect(out).toMatch(/ship-me.+scope:.+other-pkg.+\[mismatch\]/);
+    } finally {
+      if (prev === undefined) delete process.env.PYPI_API_TOKEN;
+      else process.env.PYPI_API_TOKEN = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('token list: prints a human table of env-discovered tokens', async () => {
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const prev = {
+      TWINE_PASSWORD: process.env.TWINE_PASSWORD,
+      NPM_TOKEN: process.env.NPM_TOKEN,
+      PYPI_API_TOKEN: process.env.PYPI_API_TOKEN,
+      CARGO_REGISTRY_TOKEN: process.env.CARGO_REGISTRY_TOKEN,
+    };
+    process.env.TWINE_PASSWORD = 'pypi-AgEIcHlwaS5vcmc=';
+    process.env.NPM_TOKEN = 'npm_0000000000000000000000000000000000';
+    delete process.env.PYPI_API_TOKEN;
+    delete process.env.CARGO_REGISTRY_TOKEN;
+
+    try {
+      const code = await run(['node', 'putitoutthere', 'token', 'list']);
+      expect(code).toBe(0);
+      const out = stdoutChunks.join('');
+      expect(out).toMatch(/REGISTRY.+SOURCE.+ENV\/NAME.+DETAILS/);
+      expect(out).toMatch(/pypi.+env.+TWINE_PASSWORD/);
+      expect(out).toMatch(/npm.+env.+NPM_TOKEN/);
+      // Token values MUST NOT appear in output.
+      expect(out).not.toContain('pypi-AgEIcHlwaS5vcmc=');
+      expect(out).not.toContain('npm_0000000000000000000000000000000000');
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it('token list: emits JSON under --json', async () => {
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const prev = process.env.TWINE_PASSWORD;
+    process.env.TWINE_PASSWORD = 'pypi-AgEIcHlwaS5vcmc=';
+    try {
+      const code = await run(['node', 'putitoutthere', 'token', 'list', '--json']);
+      expect(code).toBe(0);
+      const parsed = JSON.parse(stdoutChunks.join('').trim()) as {
+        tokens: Array<{ registry: string; source: string; name: string }>;
+      };
+      expect(parsed.tokens.some((t) => t.registry === 'pypi' && t.name === 'TWINE_PASSWORD')).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.TWINE_PASSWORD;
+      else process.env.TWINE_PASSWORD = prev;
+    }
+  });
+
+  it('token list: prints a notice when no tokens are found', async () => {
+    const stdoutChunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    });
+    const prev = {
+      TWINE_PASSWORD: process.env.TWINE_PASSWORD,
+      NPM_TOKEN: process.env.NPM_TOKEN,
+      PYPI_API_TOKEN: process.env.PYPI_API_TOKEN,
+      CARGO_REGISTRY_TOKEN: process.env.CARGO_REGISTRY_TOKEN,
+    };
+    delete process.env.TWINE_PASSWORD;
+    delete process.env.NPM_TOKEN;
+    delete process.env.PYPI_API_TOKEN;
+    delete process.env.CARGO_REGISTRY_TOKEN;
+
+    // Use a scratch cwd so tokenList's config load returns empty.
+    const dir = mkdtempSync(join(tmpdir(), 'cli-token-list-'));
+    try {
+      const code = await run(['node', 'putitoutthere', 'token', 'list', '--cwd', dir]);
+      expect(code).toBe(0);
+      expect(stdoutChunks.join('')).toMatch(/no registry tokens found/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
   it('surfaces errors with a non-zero exit and a friendly message', async () => {
     const stderrChunks: string[] = [];
     vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
