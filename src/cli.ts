@@ -20,7 +20,7 @@ import { init } from './init.js';
 import { plan } from './plan.js';
 import { runPreflight } from './preflight-run.js';
 import { publish } from './publish.js';
-import { inspect, type Registry } from './token.js';
+import { inspect, tokenList, type Registry, type TokenListRow } from './token.js';
 
 const VERSION = pkg.version;
 
@@ -47,7 +47,7 @@ function printUsage(): void {
       '  publish    Execute the plan',
       '  doctor     Validate config + handlers + auth (#23)',
       '  preflight  Run every pre-publish check without side effects (#93)',
-      '  token      Inspect registry tokens (pypi/npm/crates)',
+      '  token      Inspect or list registry tokens (pypi/npm/crates)',
       '  version    Print CLI version',
       '',
       'Options:',
@@ -57,6 +57,8 @@ function printUsage(): void {
       '  --json            emit machine-readable output (plan only)',
       '  --force           overwrite putitoutthere.toml on init',
       '  --artifacts       doctor: also check artifact completeness',
+      '  --deep            doctor: also inspect each token\'s publish scope',
+      '  --preflight-check publish: refuse on token scope mismatch (pypi/npm)',
       '  --all             preflight: include non-cascaded packages too',
       '  --cadence <mode>  init: immediate (default) or scheduled',
       '  --token <value>   token inspect: token value (else read from env)',
@@ -76,6 +78,8 @@ interface ParsedFlags {
   force: boolean;
   artifacts: boolean;
   all: boolean;
+  deep: boolean;
+  preflightCheck: boolean;
   cadence?: 'immediate' | 'scheduled';
   token?: string;
   registry?: Registry;
@@ -89,6 +93,8 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     force: false,
     artifacts: false,
     all: false,
+    deep: false,
+    preflightCheck: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -100,6 +106,8 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--force') out.force = true;
     else if (a === '--artifacts') out.artifacts = true;
     else if (a === '--all') out.all = true;
+    else if (a === '--deep') out.deep = true;
+    else if (a === '--preflight-check') out.preflightCheck = true;
     else if (a === '--cadence') {
       const v = argv[++i];
       /* v8 ignore next -- invalid cadence is caught by the type system for legit callers */
@@ -172,6 +180,7 @@ export async function run(argv: readonly string[]): Promise<number> {
           /* v8 ignore next -- --config test covered in plan arm; publish shares the same plumbing */
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
           dryRun: flags.dryRun,
+          preflightCheck: flags.preflightCheck,
         });
         if (flags.json) {
           process.stdout.write(JSON.stringify(result) + '\n');
@@ -194,13 +203,17 @@ export async function run(argv: readonly string[]): Promise<number> {
           /* v8 ignore next -- --config test covered via plan arm */
           ...(flags.config !== undefined ? { configPath: flags.config } : {}),
           checkArtifacts: flags.artifacts,
+          deep: flags.deep,
         });
         if (flags.json) {
           process.stdout.write(JSON.stringify(report) + '\n');
         } else {
           for (const p of report.packages) {
             const badge = p.auth === 'missing' ? '✗' : '✓';
-            process.stdout.write(`  ${badge} ${p.name} (${p.kind}) — auth: ${p.auth}\n`);
+            const scopeSuffix = p.scope !== undefined
+              ? `  scope: ${p.scope}${p.scope_match && p.scope_match !== 'ok' ? ` [${p.scope_match}]` : ''}`
+              : '';
+            process.stdout.write(`  ${badge} ${p.name} (${p.kind}) — auth: ${p.auth}${scopeSuffix}\n`);
           }
           if (report.artifacts && report.artifacts.length > 0) {
             process.stdout.write('\nArtifacts:\n');
@@ -252,10 +265,23 @@ export async function run(argv: readonly string[]): Promise<number> {
       }
       case 'token': {
         const [sub, ...subRest] = rest;
+        if (sub === 'list') {
+          const subFlags = parseFlags(subRest);
+          const rows = tokenList({
+            cwd: subFlags.cwd,
+            ...(subFlags.config !== undefined ? { configPath: subFlags.config } : {}),
+          });
+          if (subFlags.json) {
+            process.stdout.write(JSON.stringify({ tokens: rows }) + '\n');
+          } else {
+            printTokenList(rows);
+          }
+          return 0;
+        }
         if (sub !== 'inspect') {
           process.stderr.write(
             sub === undefined
-              ? 'putitoutthere token: missing subcommand (expected "inspect")\n'
+              ? 'putitoutthere token: missing subcommand (expected "inspect" or "list")\n'
               : `putitoutthere token: unknown subcommand: ${sub}\n`,
           );
           return 1;
@@ -330,6 +356,28 @@ function envTokenFor(registry: Registry | undefined): string | undefined {
   }
   const filtered = matches.filter((m) => m.registry === registry);
   return filtered[0]?.value;
+}
+
+function printTokenList(rows: TokenListRow[]): void {
+  if (rows.length === 0) {
+    process.stdout.write('no registry tokens found in environment\n');
+    return;
+  }
+  const headers = ['REGISTRY', 'SOURCE', 'ENV/NAME', 'DETAILS'] as const;
+  const widths = headers.map((h) => h.length);
+  for (const r of rows) {
+    widths[0] = Math.max(widths[0]!, r.registry.length);
+    widths[1] = Math.max(widths[1]!, r.source.length);
+    widths[2] = Math.max(widths[2]!, r.name.length);
+    widths[3] = Math.max(widths[3]!, r.details.length);
+  }
+  const pad = (s: string, w: number): string => s + ' '.repeat(Math.max(0, w - s.length));
+  const line = (cells: readonly string[]): string =>
+    cells.map((c, i) => pad(c, widths[i]!)).join('  ').trimEnd() + '\n';
+  process.stdout.write(line(headers));
+  for (const r of rows) {
+    process.stdout.write(line([r.registry, r.source, r.name, r.details]));
+  }
 }
 
 function printInspectHuman(result: Awaited<ReturnType<typeof inspect>>): void {

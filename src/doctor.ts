@@ -21,12 +21,21 @@ import { expectedLayout, type MatrixRow } from './completeness.js';
 import { loadConfig, type Package } from './config.js';
 import { plan } from './plan.js';
 import { checkAuth, type AuthResult } from './preflight.js';
+import { deepCheck, type DeepCheckRow, type InspectFn } from './token-scope.js';
 
 export interface DoctorOptions {
   cwd: string;
   configPath?: string;
   /** When true, walks the plan and checks each artifact dir exists. */
   checkArtifacts?: boolean;
+  /**
+   * When true, resolve each package's token and run a live `inspect`
+   * to cross-check publish scope against the config. Slower (hits the
+   * registries); off by default. See #110.
+   */
+  deep?: boolean;
+  /** Override for tests; defaults to the real `inspect`. */
+  inspectFn?: InspectFn;
 }
 
 export interface DoctorReport {
@@ -36,6 +45,9 @@ export interface DoctorReport {
     name: string;
     kind: string;
     auth: AuthResult['via'];
+    /** Populated when `deep: true`. */
+    scope?: string;
+    scope_match?: DeepCheckRow['match'];
   }>;
   artifacts?: Array<{
     package: string;
@@ -77,6 +89,36 @@ export async function doctor(opts: DoctorOptions): Promise<DoctorReport> {
         issues.push(
           `auth: ${pkg.name} (${pkg.kind}) needs ${row?.acceptedEnvVars.join(' or ') ?? '<env-var>'} or OIDC`,
         );
+      }
+    }
+
+    if (opts.deep) {
+      const scopable = config.packages.filter((p) => {
+        const r = auth.results.find((x) => x.package === p.name);
+        return r !== undefined && r.via === 'token';
+      });
+      const envVarForPackage = new Map<string, string>();
+      for (const p of scopable) {
+        const r = auth.results.find((x) => x.package === p.name);
+        /* v8 ignore next -- filter above guarantees a row */
+        if (r !== undefined) envVarForPackage.set(p.name, r.envVar);
+      }
+      const rows = await deepCheck({
+        packages: scopable,
+        envVarForPackage,
+        ...(opts.inspectFn !== undefined ? { inspect: opts.inspectFn } : {}),
+      });
+      for (const row of rows) {
+        const pkgEntry = packages.find((p) => p.name === row.package);
+        /* v8 ignore next -- deepCheck rows always correspond to a scoped package */
+        if (pkgEntry === undefined) continue;
+        pkgEntry.scope = row.scope;
+        pkgEntry.scope_match = row.match;
+        if (row.match === 'mismatch' || row.match === 'error') {
+          issues.push(
+            `scope: ${row.package} (${row.kind}) — ${row.detail ?? 'token scope does not match config'}`,
+          );
+        }
       }
     }
   }

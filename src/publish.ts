@@ -24,8 +24,9 @@ import { createTag, headCommit, pushTag } from './git.js';
 import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
 import { plan, type MatrixRow } from './plan.js';
-import { requireAuth } from './preflight.js';
+import { checkAuth, requireAuth } from './preflight.js';
 import { createGitHubRelease, generateReleaseNotes } from './release.js';
+import { deepCheck, type InspectFn } from './token-scope.js';
 import type { Ctx, Handler, PublishResult } from './types.js';
 import { dumpFailure } from './verbose.js';
 
@@ -33,8 +34,17 @@ export interface PublishOptions {
   cwd: string;
   configPath?: string;
   dryRun?: boolean;
+  /**
+   * Opt-in deep auth check. When true, resolves each target's token
+   * and calls `inspect` before any publish; refuses to proceed on a
+   * scope mismatch for pypi/npm. crates.io mismatches are non-blocking
+   * (the bearer row isn't identifiable — see #110). Off by default.
+   */
+  preflightCheck?: boolean;
   /** Override for tests. */
   handlerFor?: (kind: Handler['kind']) => Handler;
+  /** Override for tests; defaults to the real `inspect`. */
+  inspectFn?: InspectFn;
 }
 
 export interface PublishOutput {
@@ -71,7 +81,43 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
   const perPackage = groupByPackage(matrix, config.packages);
 
   // 2. Pre-flight auth.
-  requireAuth([...perPackage.keys()].map((name) => mustGet(config.packages, name)));
+  const selectedPackages = [...perPackage.keys()].map((name) => mustGet(config.packages, name));
+  requireAuth(selectedPackages);
+
+  // 2b. Opt-in deep scope check. Runs after plain auth (we need a token
+  // resolved before we can inspect it). Blocking for pypi/npm scope
+  // mismatches; crates is warn-only because its bearer row isn't
+  // identifiable from /me/tokens.
+  if (opts.preflightCheck) {
+    const auth = checkAuth(selectedPackages);
+    const envVarForPackage = new Map<string, string>();
+    for (const r of auth.results) {
+      if (r.via === 'token') envVarForPackage.set(r.package, r.envVar);
+    }
+    const scopable = selectedPackages.filter((p) => envVarForPackage.has(p.name));
+    const rows = await deepCheck({
+      packages: scopable,
+      envVarForPackage,
+      ...(opts.inspectFn !== undefined ? { inspect: opts.inspectFn } : {}),
+    });
+    const blockers: string[] = [];
+    for (const row of rows) {
+      if (row.kind === 'crates' && row.match !== 'ok') {
+        log.warn(`publish: preflight: crates scope unverifiable for ${row.package}: ${row.scope}`);
+        continue;
+      }
+      if (row.match === 'mismatch' || row.match === 'error') {
+        blockers.push(`  - ${row.package} (${row.kind}): ${row.detail ?? row.scope}`);
+      }
+    }
+    if (blockers.length > 0) {
+      throw new Error(
+        ['publish: preflight-check refused; token scope does not match config:', ...blockers].join(
+          '\n',
+        ),
+      );
+    }
+  }
 
   // 3. Artifact completeness, unless dry-run (no artifacts to check).
   if (!opts.dryRun) {

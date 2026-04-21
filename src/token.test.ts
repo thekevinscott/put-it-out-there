@@ -11,13 +11,14 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 
-import { detectRegistry, inspect, isError } from './token.js';
+import { detectRegistry, inspect, isError, tokenList } from './token.js';
 import type {
   CratesInspectResult,
   NpmInspectResult,
   PypiInspectResult,
   InspectResult,
 } from './token.js';
+import type { Package } from './config.js';
 
 const NPM_BASE = 'https://npm.test';
 const CRATES_BASE = 'https://crates.test';
@@ -565,5 +566,129 @@ describe('inspect — crates.io live probe', () => {
     );
     const r = await inspect({ token: 'raw4', baseUrl: CRATES_BASE });
     expect(isError(r)).toBe(true);
+  });
+});
+
+describe('tokenList', () => {
+  const pypiPkg: Package = {
+    kind: 'pypi',
+    name: 'my-pypi',
+    path: 'packages/py',
+    paths: ['packages/py/**'],
+    depends_on: [],
+    first_version: '0.1.0',
+  };
+  const npmPkg: Package = {
+    kind: 'npm',
+    name: 'my-npm',
+    path: 'packages/node',
+    paths: ['packages/node/**'],
+    depends_on: [],
+    first_version: '0.1.0',
+  };
+  const cratesPkg: Package = {
+    kind: 'crates',
+    name: 'my-crate',
+    path: 'crates/core',
+    paths: ['crates/core/**'],
+    depends_on: [],
+    first_version: '0.1.0',
+  };
+
+  it('classifies pypi- and npm_ prefixed values regardless of config', () => {
+    const rows = tokenList({
+      packages: [],
+      env: {
+        TWINE_PASSWORD: 'pypi-AgEIcHlwaS5vcmc=',
+        NPM_TOKEN: 'npm_abcdefghijklmnopqrstuvwxyz012345',
+        UNRELATED: 'hello world',
+      },
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.name === 'TWINE_PASSWORD')).toMatchObject({
+      registry: 'pypi',
+      source: 'env',
+      details: 'pypi- prefix, macaroon',
+    });
+    expect(rows.find((r) => r.name === 'NPM_TOKEN')).toMatchObject({
+      registry: 'npm',
+      source: 'env',
+      details: 'npm_ prefix (granular)',
+    });
+  });
+
+  it('classifies an opaque CARGO_REGISTRY_TOKEN only when config has a crates package', () => {
+    const rowsNoCrates = tokenList({
+      packages: [pypiPkg, npmPkg],
+      env: { CARGO_REGISTRY_TOKEN: 'cio00000000000000000000000000000000000' },
+    });
+    expect(rowsNoCrates).toHaveLength(0);
+
+    const rowsWithCrates = tokenList({
+      packages: [cratesPkg],
+      env: { CARGO_REGISTRY_TOKEN: 'cio00000000000000000000000000000000000' },
+    });
+    expect(rowsWithCrates).toEqual([
+      {
+        registry: 'crates',
+        source: 'env',
+        name: 'CARGO_REGISTRY_TOKEN',
+        details: 'opaque (from config)',
+      },
+    ]);
+  });
+
+  it('ignores unmatched and empty values', () => {
+    const rows = tokenList({
+      packages: [cratesPkg, pypiPkg, npmPkg],
+      env: {
+        HOME: '/home/user',
+        PATH: '/usr/bin',
+        EMPTY: '   ',
+        UNDEF_LIKE: '',
+        OPAQUE_RANDOM: 'some-api-key-but-wrong-env-name',
+      },
+    });
+    expect(rows).toHaveLength(0);
+  });
+
+  it('sorts rows by registry then env var name', () => {
+    const rows = tokenList({
+      packages: [cratesPkg],
+      env: {
+        Z_TWINE: 'pypi-xyz',
+        A_TWINE: 'pypi-abc',
+        CARGO_REGISTRY_TOKEN: 'cio00000',
+      },
+    });
+    expect(rows.map((r) => r.name)).toEqual(['CARGO_REGISTRY_TOKEN', 'A_TWINE', 'Z_TWINE']);
+  });
+
+  it('never surfaces token values', () => {
+    const secret = 'pypi-SUPER-SECRET-VALUE';
+    const rows = tokenList({
+      packages: [],
+      env: { TWINE_PASSWORD: secret },
+    });
+    for (const r of rows) {
+      for (const v of Object.values(r)) {
+        expect(String(v)).not.toContain(secret);
+        expect(String(v)).not.toContain('SUPER-SECRET-VALUE');
+      }
+    }
+  });
+
+  it('falls back to env-only classification when config cannot be loaded', () => {
+    // No packages passed, no valid config → hasCrates = false. Prefix-based
+    // tokens still classify; opaque crates env var is ignored.
+    const rows = tokenList({
+      configPath: '/nonexistent/path/does-not-exist.toml',
+      env: {
+        TWINE_PASSWORD: 'pypi-something',
+        CARGO_REGISTRY_TOKEN: 'opaque',
+      },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.registry).toBe('pypi');
   });
 });
