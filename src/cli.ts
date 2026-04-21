@@ -268,7 +268,7 @@ export async function run(argv: readonly string[]): Promise<number> {
           );
           return 1;
         }
-        const result = inspect({
+        const result = await inspect({
           token: tokenValue,
           ...(subFlags.registry !== undefined ? { registry: subFlags.registry } : {}),
         });
@@ -332,7 +332,7 @@ function envTokenFor(registry: Registry | undefined): string | undefined {
   return filtered[0]?.value;
 }
 
-function printInspectHuman(result: ReturnType<typeof inspect>): void {
+function printInspectHuman(result: Awaited<ReturnType<typeof inspect>>): void {
   if ('error' in result) {
     process.stderr.write(
       `inspect failed (${result.registry}, digest=${result.source_digest}): ${result.error}\n`,
@@ -352,8 +352,29 @@ function printInspectHuman(result: ReturnType<typeof inspect>): void {
       }
     }
     lines.push(`expired:  ${String(result.expired)}`);
+  } else if (result.registry === 'npm') {
+    lines.push(`format:   ${result.format}`);
+    lines.push(`username: ${result.username}`);
+    if (result.scope_row) {
+      lines.push(`readonly: ${String(result.scope_row.readonly)}`);
+      lines.push(`automation: ${String(result.scope_row.automation)}`);
+      if (result.scope_row.packages) lines.push(`packages: ${result.scope_row.packages.join(', ')}`);
+      if (result.scope_row.scopes) lines.push(`scopes:   ${result.scope_row.scopes.join(', ')}`);
+      if (result.scope_row.orgs) lines.push(`orgs:     ${result.scope_row.orgs.join(', ')}`);
+      if (result.scope_row.expires_at) lines.push(`expires:  ${result.scope_row.expires_at}`);
+    } else if (result.note) {
+      lines.push(`note:     ${result.note}`);
+    }
   } else {
-    lines.push(`status:   ${result.status}`);
+    lines.push(`username: ${result.username}`);
+    if (result.account_tokens) {
+      lines.push(`account tokens (${result.account_tokens.length}):`);
+      for (const t of result.account_tokens) {
+        const scopes = t.endpoint_scopes?.join(',') ?? '(unscoped)';
+        const crates = t.crate_scopes?.join(',') ?? '(all)';
+        lines.push(`  - ${t.name}: endpoints=${scopes} crates=${crates}`);
+      }
+    }
     lines.push(`note:     ${result.note}`);
   }
   process.stdout.write(lines.join('\n') + '\n');
