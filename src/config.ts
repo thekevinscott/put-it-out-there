@@ -114,7 +114,7 @@ export function parseConfig(toml: string): Config {
     raw = parseToml(toml);
     /* v8 ignore start -- smol-toml always throws Error; non-Error rethrow path is defensive */
   } catch (err) {
-    throw new Error(`putitoutthere.toml: invalid TOML: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`putitoutthere.toml: invalid TOML: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   /* v8 ignore stop */
   const result = FILE.safeParse(raw);
@@ -137,6 +137,7 @@ export function loadConfig(path: string): Config {
   } catch (err) {
     throw new Error(
       `putitoutthere.toml: cannot read ${path}: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
   /* v8 ignore stop */

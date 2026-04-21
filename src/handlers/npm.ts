@@ -147,10 +147,11 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
             'npm trusted publishing requires the package to exist first.',
             'Bootstrap by setting NODE_AUTH_TOKEN for the first publish; you can migrate to trusted publishing afterwards.',
           ].join('\n'),
+          { cause: err },
         );
       }
     }
-    throw new Error(`npm publish failed${stderr ? `:\n${stderr}` : `: ${base}`}`);
+    throw new Error(`npm publish failed${stderr ? `:\n${stderr}` : `: ${base}`}`, { cause: err });
   }
 
   return {

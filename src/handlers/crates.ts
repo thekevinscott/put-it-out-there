@@ -99,7 +99,7 @@ async function publishImpl(
   } catch (err) {
     const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
     const base = err instanceof Error ? err.message : String(err);
-    throw new Error(`cargo publish failed${stderr ? `:\n${stderr}` : `: ${base}`}`);
+    throw new Error(`cargo publish failed${stderr ? `:\n${stderr}` : `: ${base}`}`, { cause: err });
   }
 
   return {

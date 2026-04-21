@@ -180,6 +180,7 @@ function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
     const base = err instanceof Error ? err.message : String(err);
     throw new Error(
       `npm publish (platform) failed${stderr ? `:\n${stderr}` : `: ${base}`}`,
+      { cause: err },
     );
   }
 }
