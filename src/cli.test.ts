@@ -653,27 +653,6 @@ paths = ["packages/ts/**"]
     expect(stderrChunks.join('')).toMatch(/inspect failed/);
   });
 
-  it('token inspect: prints status+note for an npm_ token placeholder', async () => {
-    const stdoutChunks: string[] = [];
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    });
-    const code = await run([
-      'node',
-      'putitoutthere',
-      'token',
-      'inspect',
-      '--token',
-      'npm_abcdef0123456789',
-    ]);
-    expect(code).toBe(0);
-    const out = stdoutChunks.join('');
-    expect(out).toMatch(/registry: npm/);
-    expect(out).toMatch(/status:\s+pending/);
-    expect(out).toMatch(/note:/);
-  });
-
   it('token inspect: auto-reads the sole pypi token from env when --token omitted', async () => {
     const identifier = { version: 1, permissions: 'user', user: 'u-env' };
     const bytes = Buffer.concat([

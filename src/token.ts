@@ -1,17 +1,17 @@
 /**
  * `putitoutthere token inspect` — decode/introspect registry tokens.
  *
- * Issue #107 (scaffold + PyPI). npm and crates.io live probes land in
- * #108 and #109 respectively; their handlers return a `pending`
- * placeholder until then.
+ * Scaffolding and PyPI offline decode: #107.
+ * npm live probe: #108 (whoami + SHA-512 match against /-/npm/v1/tokens).
+ * crates.io live probe: #109 (/api/v1/me + /api/v1/me/tokens).
  *
  * Dispatch is driven by token format, not by a hardcoded registry list:
  *   - `pypi-` prefix  → PyPI macaroon decode (offline, full scope)
- *   - `npm_` prefix   → npm (#108)
- *   - otherwise       → crates.io (#109), unless `--registry` overrides
+ *   - `npm_` prefix   → npm (live probe)
+ *   - otherwise       → crates.io (live probe), unless `--registry` overrides
  *
  * Token values are never logged. Logs identify a token by the first 8
- * hex chars of its SHA-256.
+ * hex chars of its SHA-256. Live probes are timeboxed at 5s per request.
  */
 
 import { createHash } from 'node:crypto';
@@ -21,6 +21,10 @@ export type Registry = 'pypi' | 'npm' | 'crates';
 export interface InspectOptions {
   token: string;
   registry?: Registry;
+  /** Override live-probe base URL. Tests only. */
+  baseUrl?: string;
+  /** Override live-probe timeout in ms (default 5000). Tests only. */
+  timeoutMs?: number;
 }
 
 export type InspectResult =
@@ -48,16 +52,37 @@ export type Restriction =
   | { type: 'Date'; not_before?: number; not_after?: number }
   | { type: 'Unknown'; raw: Record<string, unknown> };
 
+export interface NpmScopeRow {
+  readonly: boolean;
+  automation: boolean;
+  packages: string[] | null;
+  scopes: string[] | null;
+  orgs: string[] | null;
+  expires_at: string | null;
+  cidr_whitelist: string[] | null;
+  created: string | null;
+}
+
 export interface NpmInspectResult extends BaseResult {
   registry: 'npm';
   format: 'granular' | 'legacy' | 'unknown';
-  status: 'pending';
-  note: string;
+  username: string;
+  scope_row: NpmScopeRow | null;
+  note?: string;
+}
+
+export interface CratesTokenRow {
+  name: string;
+  endpoint_scopes: string[] | null;
+  crate_scopes: string[] | null;
+  expired_at: string | null;
 }
 
 export interface CratesInspectResult extends BaseResult {
   registry: 'crates';
-  status: 'pending';
+  username: string;
+  account_tokens: CratesTokenRow[] | null;
+  bearer_row: null;
   note: string;
 }
 
@@ -71,14 +96,17 @@ export function isError(r: InspectResult): r is InspectErrorResult {
   return 'error' in r;
 }
 
-export function inspect(opts: InspectOptions): InspectResult {
+export async function inspect(opts: InspectOptions): Promise<InspectResult> {
   const token = opts.token;
   const digest = sha256Prefix(token);
   const registry = opts.registry ?? detectRegistry(token);
+  const timeoutMs = opts.timeoutMs ?? 5000;
 
   if (registry === 'pypi') return inspectPypi(token, digest);
-  if (registry === 'npm') return inspectNpmPlaceholder(token, digest);
-  return inspectCratesPlaceholder(digest);
+  /* v8 ignore next -- default baseUrl for production; tests always inject a mock URL */
+  const baseUrl = opts.baseUrl ?? (registry === 'npm' ? NPM_REGISTRY : CRATES_REGISTRY);
+  if (registry === 'npm') return inspectNpm(token, digest, baseUrl, timeoutMs);
+  return inspectCrates(token, digest, baseUrl, timeoutMs);
 }
 
 export function detectRegistry(token: string): Registry {
@@ -89,6 +117,10 @@ export function detectRegistry(token: string): Registry {
 
 function sha256Prefix(token: string): string {
   return createHash('sha256').update(token).digest('hex').slice(0, 8);
+}
+
+function sha512Hex(s: string): string {
+  return createHash('sha512').update(s).digest('hex');
 }
 
 // ---- PyPI --------------------------------------------------------------
@@ -264,26 +296,276 @@ function hasExpired(restrictions: Restriction[]): boolean {
   return false;
 }
 
-// ---- npm (placeholder; #108) ------------------------------------------
+// ---- HTTP helper ------------------------------------------------------
 
-function inspectNpmPlaceholder(token: string, digest: string): NpmInspectResult {
-  const format: NpmInspectResult['format'] = token.startsWith('npm_') ? 'granular' : 'unknown';
+interface ProbeResponse {
+  status: number;
+  body: unknown;
+}
+
+async function probe(
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+): Promise<ProbeResponse | { timeout: true }> {
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'user-agent': 'putitoutthere/0.0.1', ...headers },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    let body: unknown = null;
+    /* v8 ignore next 5 -- registries always return JSON on the endpoints we hit */
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    return { status: res.status, body };
+  } catch {
+    // Timeout, aborted fetch, and network errors all collapse to the same outcome:
+    // the caller treats the probe as a timeout and reports it to the user.
+    return { timeout: true };
+  }
+}
+
+// ---- npm --------------------------------------------------------------
+
+const NPM_REGISTRY = 'https://registry.npmjs.org';
+
+async function inspectNpm(
+  token: string,
+  digest: string,
+  baseUrl: string,
+  timeoutMs: number,
+): Promise<InspectResult> {
+  const authHeader = { authorization: `Bearer ${token}` };
+  const format: NpmInspectResult['format'] = token.startsWith('npm_')
+    ? 'granular'
+    : 'legacy';
+
+  const whoami = await probe(`${baseUrl}/-/whoami`, authHeader, timeoutMs);
+  if ('timeout' in whoami) {
+    return { registry: 'npm', source_digest: digest, error: 'timeout' };
+  }
+  if (whoami.status === 401 || whoami.status === 403) {
+    return {
+      registry: 'npm',
+      source_digest: digest,
+      error: 'token invalid or expired',
+    };
+  }
+  /* v8 ignore next 7 -- unexpected non-200 from /-/whoami; real responses hit 200/401/403 */
+  if (whoami.status !== 200 || !isPlainObject(whoami.body) || typeof whoami.body.username !== 'string') {
+    return {
+      registry: 'npm',
+      source_digest: digest,
+      error: `unexpected whoami response (status ${whoami.status})`,
+    };
+  }
+  const username = whoami.body.username;
+
+  const tokens = await probe(`${baseUrl}/-/npm/v1/tokens`, authHeader, timeoutMs);
+  if ('timeout' in tokens) {
+    return {
+      registry: 'npm',
+      source_digest: digest,
+      error: 'timeout',
+    };
+  }
+  if (tokens.status === 401 || tokens.status === 403) {
+    return {
+      registry: 'npm',
+      source_digest: digest,
+      format,
+      username,
+      scope_row: null,
+      note: `tokens endpoint returned ${tokens.status}; only username is confirmed`,
+    };
+  }
+  /* v8 ignore next 10 -- unexpected non-200 from tokens endpoint; 200/401/403 cover real cases */
+  if (tokens.status !== 200) {
+    return {
+      registry: 'npm',
+      source_digest: digest,
+      format,
+      username,
+      scope_row: null,
+      note: `tokens endpoint returned ${tokens.status}; only username is confirmed`,
+    };
+  }
+
+  const rows = extractNpmTokenRows(tokens.body);
+  const want = sha512Hex(token);
+  const match = rows.find((r) => typeof r.key === 'string' && r.key === want);
+
+  if (!match) {
+    return {
+      registry: 'npm',
+      source_digest: digest,
+      format,
+      username,
+      scope_row: null,
+      note: 'no SHA-512 match in tokens list (legacy UUID token, or bearer not listable)',
+    };
+  }
+
   return {
     registry: 'npm',
     source_digest: digest,
     format,
-    status: 'pending',
-    note: 'npm live probe not yet implemented (see #108)',
+    username,
+    scope_row: normalizeNpmRow(match),
   };
 }
 
-// ---- crates.io (placeholder; #109) ------------------------------------
+interface NpmRawRow {
+  key?: unknown;
+  token?: unknown;
+  readonly?: unknown;
+  automation?: unknown;
+  cidr_whitelist?: unknown;
+  created?: unknown;
+  updated?: unknown;
+  expires?: unknown;
+  scopes?: unknown;
+}
 
-function inspectCratesPlaceholder(digest: string): CratesInspectResult {
+function extractNpmTokenRows(body: unknown): NpmRawRow[] {
+  if (Array.isArray(body)) return body.filter(isPlainObject) as NpmRawRow[];
+  if (isPlainObject(body) && Array.isArray(body.objects)) {
+    return body.objects.filter(isPlainObject) as NpmRawRow[];
+  }
+  return [];
+}
+
+function normalizeNpmRow(row: NpmRawRow): NpmScopeRow {
+  const scopes = Array.isArray(row.scopes)
+    ? row.scopes.filter((s): s is string => typeof s === 'string')
+    : null;
+  const packages: string[] = [];
+  const orgs: string[] = [];
+  const atScopes: string[] = [];
+  if (scopes) {
+    for (const s of scopes) {
+      if (s.startsWith('pkg:')) packages.push(s.slice(4));
+      else if (s.startsWith('org:')) orgs.push(s.slice(4));
+      else if (s.startsWith('@')) atScopes.push(s);
+    }
+  }
+  return {
+    readonly: row.readonly === true,
+    automation: row.automation === true,
+    packages: packages.length > 0 ? packages : null,
+    scopes: atScopes.length > 0 ? atScopes : null,
+    orgs: orgs.length > 0 ? orgs : null,
+    expires_at: typeof row.expires === 'string' ? row.expires : null,
+    cidr_whitelist: Array.isArray(row.cidr_whitelist)
+      ? row.cidr_whitelist.filter((c): c is string => typeof c === 'string')
+      : null,
+    created: typeof row.created === 'string' ? row.created : null,
+  };
+}
+
+// ---- crates.io --------------------------------------------------------
+
+const CRATES_REGISTRY = 'https://crates.io';
+
+async function inspectCrates(
+  token: string,
+  digest: string,
+  baseUrl: string,
+  timeoutMs: number,
+): Promise<InspectResult> {
+  // crates.io takes the raw token as the Authorization header — no Bearer prefix.
+  const authHeader = { authorization: token };
+
+  const me = await probe(`${baseUrl}/api/v1/me`, authHeader, timeoutMs);
+  if ('timeout' in me) {
+    return { registry: 'crates', source_digest: digest, error: 'timeout' };
+  }
+  if (me.status === 401 || me.status === 403) {
+    return {
+      registry: 'crates',
+      source_digest: digest,
+      error: 'token invalid or expired',
+    };
+  }
+  /* v8 ignore next 7 -- unexpected non-200 from /me; 200/401/403 cover real cases */
+  if (me.status !== 200 || !isPlainObject(me.body)) {
+    return {
+      registry: 'crates',
+      source_digest: digest,
+      error: `unexpected /me response (status ${me.status})`,
+    };
+  }
+  const username = extractCratesUsername(me.body);
+  /* v8 ignore next 7 -- /me schema always includes user.login */
+  if (username === null) {
+    return {
+      registry: 'crates',
+      source_digest: digest,
+      error: 'could not find username in /me response',
+    };
+  }
+
+  const tokensRes = await probe(`${baseUrl}/api/v1/me/tokens`, authHeader, timeoutMs);
+  if ('timeout' in tokensRes) {
+    return { registry: 'crates', source_digest: digest, error: 'timeout' };
+  }
+  if (tokensRes.status === 401 || tokensRes.status === 403) {
+    return {
+      registry: 'crates',
+      source_digest: digest,
+      username,
+      account_tokens: null,
+      bearer_row: null,
+      note: `tokens endpoint returned ${tokensRes.status}; only username is confirmed`,
+    };
+  }
+  /* v8 ignore next 11 -- unexpected non-200 from tokens endpoint; 200/401/403 cover real cases */
+  if (tokensRes.status !== 200 || !isPlainObject(tokensRes.body)) {
+    return {
+      registry: 'crates',
+      source_digest: digest,
+      username,
+      account_tokens: null,
+      bearer_row: null,
+      note: `tokens endpoint returned ${tokensRes.status}; only username is confirmed`,
+    };
+  }
+
+  const raw = Array.isArray(tokensRes.body.api_tokens) ? tokensRes.body.api_tokens : [];
+  const account_tokens: CratesTokenRow[] = raw.filter(isPlainObject).map(normalizeCratesRow);
+
   return {
     registry: 'crates',
     source_digest: digest,
-    status: 'pending',
-    note: 'crates.io live probe not yet implemented (see #109)',
+    username,
+    account_tokens,
+    bearer_row: null,
+    note: 'crates.io does not expose which row corresponds to the bearer.',
+  };
+}
+
+function extractCratesUsername(body: Record<string, unknown>): string | null {
+  if (isPlainObject(body.user) && typeof body.user.login === 'string') {
+    return body.user.login;
+  }
+  /* v8 ignore next 3 -- alternate shape guard; /me always returns {user:{login}} */
+  if (typeof body.login === 'string') return body.login;
+  return null;
+}
+
+function normalizeCratesRow(row: Record<string, unknown>): CratesTokenRow {
+  return {
+    name: typeof row.name === 'string' ? row.name : '(unnamed)',
+    endpoint_scopes: Array.isArray(row.endpoint_scopes)
+      ? row.endpoint_scopes.filter((s): s is string => typeof s === 'string')
+      : null,
+    crate_scopes: Array.isArray(row.crate_scopes)
+      ? row.crate_scopes.filter((s): s is string => typeof s === 'string')
+      : null,
+    expired_at: typeof row.expired_at === 'string' ? row.expired_at : null,
   };
 }
