@@ -146,6 +146,20 @@ describe('dumpFailure: redaction', () => {
     const md = readFileSync(summaryPath, 'utf8');
     expect(md).not.toContain('super-secret-xyz');
   });
+
+  it('redacts secrets from DumpOptions.extraEnvs, not just process.env (#136)', () => {
+    const ctxEnv = { TWINE_PASSWORD: 'pypi-oidc-minted-789' };
+    const logDest = new BufStream();
+    const log = createLogger({ stream: logDest, pretty: false });
+    dumpFailure(
+      new Error('upload failed'),
+      baseCtx({ stderr: 'HTTP 403: supplied token pypi-oidc-minted-789 is invalid' }),
+      { log, extraEnvs: [ctxEnv] },
+    );
+    const md = readFileSync(summaryPath, 'utf8');
+    expect(md).not.toContain('pypi-oidc-minted-789');
+    expect(md).toMatch(/\[REDACTED:[0-9a-f]{8}\]/);
+  });
 });
 
 describe('dumpFailure: size cap (4MB)', () => {

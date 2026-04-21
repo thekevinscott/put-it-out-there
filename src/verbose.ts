@@ -47,6 +47,12 @@ export interface FailureContext {
 
 export interface DumpOptions {
   log: Logger;
+  /**
+   * Env-like maps whose secret values should be redacted alongside
+   * `process.env`. Lets callers redact `ctx.env`-scoped tokens that
+   * never leaked into `process.env` (#136).
+   */
+  extraEnvs?: readonly NodeJS.ProcessEnv[];
 }
 
 const SUMMARY_CAP = 4 * 1024 * 1024; // GHA job-summary ceiling: 1 MiB per step, 20 MiB total. Cap at 4 MiB to stay well under on a single failure.
@@ -57,7 +63,8 @@ export function dumpFailure(
   ctx: FailureContext,
   opts: DumpOptions,
 ): void {
-  const md = redact(renderMarkdown(err, ctx));
+  const envs = opts.extraEnvs ? [process.env, ...opts.extraEnvs] : undefined;
+  const md = envs ? redact(renderMarkdown(err, ctx), envs) : redact(renderMarkdown(err, ctx));
   writeSummary(truncate(md));
 
   // A single structured record pairs the summary so downstream log

@@ -34,6 +34,14 @@ export interface LoggerOptions {
   stream?: Writable;
   pretty?: boolean; // default: detect by stream.isTTY if available, else false
   level?: Level;    // default: 'info'
+  /**
+   * Extra env-like maps whose `*TOKEN*` / `*SECRET*` / `*PASSWORD*` /
+   * `*KEY*` values should be redacted alongside `process.env`.
+   * Handlers receive `ctx.env` as a separate layered environment; a
+   * secret injected there but never exported to `process.env` would
+   * otherwise slip through to CI logs (#136).
+   */
+  extraEnvs?: readonly NodeJS.ProcessEnv[];
 }
 
 export function createLogger(opts: LoggerOptions = {}): Logger {
@@ -44,12 +52,13 @@ export function createLogger(opts: LoggerOptions = {}): Logger {
   const pretty = opts.pretty ?? isTty(stream);
   /* v8 ignore next -- 'info' default vs explicit level both exercised; the ?? branch is one of those */
   const minLevel = LEVEL_ORDER[opts.level ?? 'info'];
+  const extraEnvs = opts.extraEnvs;
 
   const emit = (level: Level, msg: string, fields: Record<string, unknown>): void => {
     if (LEVEL_ORDER[level] < minLevel) return;
     const record = { level, time: new Date().toISOString(), msg, ...fields };
     const raw = pretty ? formatPretty(record) : `${JSON.stringify(record)}\n`;
-    stream.write(redact(raw));
+    stream.write(extraEnvs ? redact(raw, [process.env, ...extraEnvs]) : redact(raw));
   };
 
   return {
@@ -91,16 +100,22 @@ const SECRET_KEY = /TOKEN|SECRET|PASSWORD|KEY/i;
  * tokens across log lines without ever seeing the value itself.
  * Empty / single-char values are skipped to avoid mangling unrelated
  * characters. Called on every log write.
+ *
+ * Accepts one or more env-like sources so callers can include
+ * layered environments (e.g. `ctx.env`) alongside `process.env`
+ * (#136).
  */
-export function redact(s: string): string {
+export function redact(s: string, envs: readonly NodeJS.ProcessEnv[] = [process.env]): string {
   let out = s;
-  for (const [k, v] of Object.entries(process.env)) {
-    if (!SECRET_KEY.test(k)) continue;
-    if (typeof v !== 'string' || v.length < 2) continue;
-    if (!out.includes(v)) continue;
-    // String.replaceAll expects a literal or a RegExp; use split/join to
-    // avoid regex escaping every secret value.
-    out = out.split(v).join(`[REDACTED:${tokenDigest(v)}]`);
+  for (const env of envs) {
+    for (const [k, v] of Object.entries(env)) {
+      if (!SECRET_KEY.test(k)) continue;
+      if (typeof v !== 'string' || v.length < 2) continue;
+      if (!out.includes(v)) continue;
+      // String.replaceAll expects a literal or a RegExp; use split/join to
+      // avoid regex escaping every secret value.
+      out = out.split(v).join(`[REDACTED:${tokenDigest(v)}]`);
+    }
   }
   return out;
 }

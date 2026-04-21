@@ -214,7 +214,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
           stderr: error.message,
           exitCode: -1,
         },
-        { log },
+        { log, extraEnvs: [ctx.env] },
       );
       throw error;
     }

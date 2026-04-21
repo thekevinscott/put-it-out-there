@@ -138,6 +138,18 @@ describe('createLogger: redaction (§22.5)', () => {
     log.info('payload: lowercased');
     expect(dest.text).not.toContain('lowercased');
   });
+
+  it('redacts secrets from extraEnvs sources alongside process.env (#136)', () => {
+    // Secret lives in a ctx.env-shaped map but NOT process.env.
+    // The old redactor only walked process.env and would leak this.
+    const ctxEnv = { TWINE_PASSWORD: 'oidc-minted-xyz', OTHER: 'ignore-me' };
+    const dest = new BufStream();
+    const log = createLogger({ stream: dest, pretty: false, extraEnvs: [ctxEnv] });
+    log.info('publish failed: sent token oidc-minted-xyz to pypi');
+    const line = dest.text;
+    expect(line).not.toContain('oidc-minted-xyz');
+    expect(line).toMatch(/\[REDACTED:[0-9a-f]{8}\]/);
+  });
 });
 
 describe('createLogger: pretty mode', () => {
