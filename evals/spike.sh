@@ -1,29 +1,52 @@
 #!/usr/bin/env bash
 # Agent-behavior eval spike.
 #
-# Runs a condensed single-turn probe against the dirsql-scope fixture:
-#   1. Invoke `claude -p` with WebSearch+WebFetch only (docs-published scope),
-#      Opus 4.7, no CLAUDE.md auto-discovery (we run from /tmp).
-#   2. Capture the evaluation prose to snapshots/<timestamp>-raw.md.
-#   3. Ask Haiku to extract structured claims from the prose.
-#   4. Diff extracted claims vs. evals/fixtures/dirsql-scope/expected.json.
-#   5. Print a pass/fail grade.
+# Runs a condensed single-turn probe against a fixture and grades the
+# output against its expected.json. Two axes vary independently:
+#
+#   1. Fixture — picks the prompt (leading vs. blinder).
+#        dirsql-scope          — names dirsql's specific pain points.
+#        dirsql-scope-blinder  — gives only structural context.
+#   2. Scope — picks the probe's tool access.
+#        webfetch   (default) — WebSearch + WebFetch (source-code reachable
+#                               via raw.githubusercontent.com).
+#        websearch            — WebSearch only (docs-site snippets only;
+#                               closer to what the original dirsql session
+#                               agent actually exercised).
+#
+# Output snapshot name is `<fixture>__<scope>-<ts>-*`. Each variant grades
+# independently against the same ground-truth expected.json; comparing
+# scores across variants tells us whether failures are prompt-driven
+# (leading vs. blinder) or tool-driven (WebFetch visibility).
 #
 # Usage:
-#   ./evals/spike.sh [fixture-name]   # default: dirsql-scope
+#   ./evals/spike.sh [fixture] [scope]
+#   ./evals/spike.sh dirsql-scope-blinder websearch
 #
+# Requires: `claude` CLI on $PATH; Anthropic API access.
 # Not wired into CI yet; see issue #164.
 
 set -euo pipefail
 
 FIXTURE="${1:-dirsql-scope}"
+SCOPE="${2:-webfetch}"
 EVAL_ROOT="$(cd "$(dirname "$0")" && pwd)"
 FIXTURE_DIR="$EVAL_ROOT/fixtures/$FIXTURE"
 SNAP_DIR="$EVAL_ROOT/snapshots"
 TS="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
-RAW="$SNAP_DIR/${FIXTURE}-${TS}-raw.md"
-EXTRACT="$SNAP_DIR/${FIXTURE}-${TS}-extracted.json"
-GRADE="$SNAP_DIR/${FIXTURE}-${TS}-grade.json"
+VARIANT="${FIXTURE}__${SCOPE}"
+RAW="$SNAP_DIR/${VARIANT}-${TS}-raw.md"
+EXTRACT="$SNAP_DIR/${VARIANT}-${TS}-extracted.json"
+GRADE="$SNAP_DIR/${VARIANT}-${TS}-grade.json"
+
+case "$SCOPE" in
+  webfetch)   ALLOWED_TOOLS="WebSearch WebFetch" ;;
+  websearch)  ALLOWED_TOOLS="WebSearch" ;;
+  *)
+    echo "ERROR: unknown scope '$SCOPE'. Expected: webfetch | websearch" >&2
+    exit 1
+    ;;
+esac
 
 mkdir -p "$SNAP_DIR"
 
@@ -31,17 +54,21 @@ if [[ ! -f "$FIXTURE_DIR/prompt.md" ]]; then
   echo "ERROR: fixture '$FIXTURE' not found at $FIXTURE_DIR/prompt.md" >&2
   exit 1
 fi
+if [[ ! -f "$FIXTURE_DIR/expected.json" ]]; then
+  echo "ERROR: fixture '$FIXTURE' missing expected.json at $FIXTURE_DIR/expected.json" >&2
+  exit 1
+fi
 
 # Isolate from the project CLAUDE.md by running from a scratch dir.
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-echo "==> probe: claude -p (Opus 4.7, WebSearch+WebFetch only) against $FIXTURE"
+echo "==> probe: variant=$VARIANT (Opus 4.7, tools: $ALLOWED_TOOLS)"
 cd "$WORK"
 claude -p \
   --model claude-opus-4-7 \
-  --tools "WebSearch,WebFetch" \
-  --allowed-tools "WebSearch WebFetch" \
+  --tools "$(echo "$ALLOWED_TOOLS" | tr ' ' ',')" \
+  --allowed-tools "$ALLOWED_TOOLS" \
   --max-budget-usd 3 \
   --output-format text \
   "$(cat "$FIXTURE_DIR/prompt.md")" \
@@ -125,9 +152,10 @@ for key, spec in expected.items():
 
 grade = {
     'fixture': '$FIXTURE',
+    'scope': '$SCOPE',
+    'variant': '$VARIANT',
     'timestamp': '$TS',
     'model': 'claude-opus-4-7',
-    'scope': 'docs-published',
     'pass': len(fails) == 0,
     'score': f'{len(expected) - len(fails)}/{len(expected)}',
     'results': results,

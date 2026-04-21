@@ -6,21 +6,48 @@ docs and code. See issue #164 for motivation.
 ## Running
 
 ```sh
-./evals/spike.sh [fixture-name]    # default: dirsql-scope
+./evals/spike.sh [fixture] [scope]
 ```
+
+Defaults: `dirsql-scope webfetch`.
 
 Requires the `claude` CLI on `$PATH` and Anthropic API access.
 
-## What it does
+## Variants
 
-1. **Probe** — runs `claude -p` (Opus 4.7, `WebSearch + WebFetch` only,
-   no local filesystem access) against the fixture's prompt. Captures
-   prose output to `snapshots/<fixture>-<ts>-raw.md`.
+Two axes vary independently. Compare scores across variants to separate
+prompt-shape effects from tool-scope effects.
+
+### Fixtures (prompt axis)
+
+| Fixture                 | What's in the prompt                                                                           |
+|-------------------------|------------------------------------------------------------------------------------------------|
+| `dirsql-scope`          | Leading: names specific pain points (cross-compile runners, OIDC filename pinning, partial-failure semantics). Pre-specifies what to evaluate. |
+| `dirsql-scope-blinder`  | Structural only: says dirsql is a Cargo workspace with three OIDC-published artifacts. Does not name specific pain points. Agent has to discover them. |
+
+Both fixtures grade against the **same** `expected.json` — ground truth
+about piot doesn't change based on how the probe was prompted.
+
+### Scopes (tool axis)
+
+| Scope        | Allowed tools         | Approximates                                                     |
+|--------------|-----------------------|------------------------------------------------------------------|
+| `webfetch`   | WebSearch + WebFetch  | Agent can read source code via `raw.githubusercontent.com`.      |
+| `websearch`  | WebSearch only        | Docs-site snippets only. Closer to the original dirsql session.  |
+
+## What the harness does
+
+1. **Probe** — runs `claude -p` (Opus 4.7, allowed-tools restricted per
+   scope, no local filesystem access) against the fixture's prompt.
+   Captures prose output to `snapshots/<variant>-<ts>-raw.md`.
 2. **Extract** — a Haiku call reads the prose and emits a structured
-   JSON claim object per primitive. Saved to `snapshots/*-extracted.json`.
+   JSON claim object per primitive. Saved to
+   `snapshots/<variant>-<ts>-extracted.json`.
 3. **Grade** — compares extracted claims to
    `fixtures/<fixture>/expected.json`. Exits non-zero on any mismatch.
-   Saved to `snapshots/*-grade.json`.
+   Saved to `snapshots/<variant>-<ts>-grade.json`.
+
+`<variant>` is `<fixture>__<scope>`, e.g. `dirsql-scope-blinder__websearch`.
 
 ## Fixture shape
 
@@ -34,16 +61,12 @@ fixtures/<name>/
 
 - **Single-turn, not multi-turn.** The motivating dirsql session was
   8 turns of evolving context. The spike condenses into one prompt.
-  Faithful replay is future work.
-- **Tool access is broader than a pure `WebSearch` scope.** The probe
-  can `WebFetch` raw GitHub URLs, giving it source-code visibility that
-  the dirsql session agent may not have exercised as thoroughly. This
-  likely explains why the spike's score (5/6) is higher than the
-  dirsql session's (approximately 2/6 correct conclusions).
-- **Leading prompt.** The current prompt names dirsql's specific pain
-  points (cross-compile runners, OIDC filename pinning, partial-failure
-  semantics) — effectively pre-specifying what to evaluate. A blinder
-  prompt ("here's dirsql's release surface, evaluate piot") would be
-  a stricter test.
+  Faithful multi-turn replay is future work.
+- **Grader model is an evaluator itself.** The Haiku extraction step
+  uses an LLM to map prose → structured claims. Treat a single run as a
+  sample, not a verdict; repeat 3× before concluding.
+- **Variants are not yet run as a matrix.** The harness runs one variant
+  per invocation. A driver that runs the full matrix and reports a
+  scoreboard is the obvious next step.
 
 See #164 for the roadmap beyond this spike.
