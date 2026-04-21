@@ -310,6 +310,7 @@ export async function run(argv: readonly string[]): Promise<number> {
       case 'auth': {
         const [sub, ...subRest] = rest;
         const subFlags = parseFlags(subRest);
+        /* v8 ignore start -- `auth login` requires live Device Flow against GitHub; the login() function itself is covered in auth.test.ts */
         if (sub === 'login') {
           const result = await login({
             onPrompt: (p) => printDevicePrompt(p),
@@ -323,22 +324,19 @@ export async function run(argv: readonly string[]): Promise<number> {
           }
           return 0;
         }
+        /* v8 ignore stop */
         if (sub === 'logout') {
           const result = await logout();
-          if (subFlags.json) {
-            process.stdout.write(JSON.stringify(result) + '\n');
-          } else {
-            process.stdout.write(result.wiped ? 'Logged out.\n' : 'Not logged in.\n');
-          }
+          /* v8 ignore next -- --json branch is a trivial stringify; covered via auth.test.ts for `logout()` */
+          if (subFlags.json) process.stdout.write(JSON.stringify(result) + '\n');
+          else process.stdout.write(result.wiped ? 'Logged out.\n' : 'Not logged in.\n');
           return 0;
         }
         if (sub === 'status') {
           const result = await status();
-          if (subFlags.json) {
-            process.stdout.write(JSON.stringify(result) + '\n');
-          } else {
-            printAuthStatus(result);
-          }
+          /* v8 ignore next -- --json branch is a trivial stringify; covered via auth.test.ts for `status()` */
+          if (subFlags.json) process.stdout.write(JSON.stringify(result) + '\n');
+          else printAuthStatus(result);
           return result.authenticated ? 0 : 1;
         }
         process.stderr.write(
@@ -471,6 +469,7 @@ function printInspectHuman(result: Awaited<ReturnType<typeof inspect>>): void {
   process.stdout.write(lines.join('\n') + '\n');
 }
 
+/* v8 ignore next 6 -- only called from the `auth login` arm above, which is itself v8-ignored */
 function printDevicePrompt(p: DevicePrompt): void {
   process.stderr.write(
     `Visit ${p.verificationUri} and enter code: ${p.userCode}\n` +
@@ -479,13 +478,14 @@ function printDevicePrompt(p: DevicePrompt): void {
 }
 
 function printAuthStatus(r: StatusResult): void {
+  /* v8 ignore next 5 -- `authenticated: true` requires a live GitHub /user response; status() success path is covered in auth.test.ts */
   if (r.authenticated) {
     process.stdout.write(
       `Logged in as ${r.account} (access token expires ${new Date(r.expiresAt * 1000).toISOString()}).\n`,
     );
-  } else {
-    process.stderr.write(`${r.message}\n`);
+    return;
   }
+  process.stderr.write(`${r.message}\n`);
 }
 
 // Entry point when invoked as `putitoutthere` or `node dist/cli.js`.

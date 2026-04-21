@@ -10,7 +10,7 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { login, logout, status } from './auth.js';
+import { login, logout, status, tokenDigest } from './auth.js';
 import type { Keyring, StoredAuth } from './keyring.js';
 
 const DEVICE_URL = 'https://github.com/login/device/code';
@@ -240,6 +240,39 @@ describe('auth.status', () => {
     expect(keyring.snapshot()?.refresh_token).toBe('ghr_refreshed');
   });
 
+  it('reports refresh_failed when the probe itself returns 5xx', async () => {
+    server.use(
+      http.get(USER_URL, () => new HttpResponse(null, { status: 500 })),
+    );
+    const keyring = memoryKeyring(validStored);
+
+    const result = await status({ keyring, now: () => 1_000_000 });
+
+    expect(result.authenticated).toBe(false);
+    if (result.authenticated) throw new Error('unreachable');
+    expect(result.reason).toBe('refresh_failed');
+    expect(result.message).toMatch(/\/user probe failed \(500\)/);
+  });
+
+  it('reports revoked when 401 → refresh succeeds → re-probe still 401', async () => {
+    server.use(
+      http.get(USER_URL, () => new HttpResponse(null, { status: 401 })),
+      http.post(TOKEN_URL, () =>
+        HttpResponse.json(
+          tokenResponse({ access_token: 'ghu_refreshed', refresh_token: 'ghr_refreshed' }),
+        ),
+      ),
+    );
+    const keyring = memoryKeyring(validStored);
+
+    const result = await status({ keyring, now: () => 1_000_000 });
+
+    expect(result.authenticated).toBe(false);
+    if (result.authenticated) throw new Error('unreachable');
+    expect(result.reason).toBe('revoked');
+    expect(result.message).toMatch(/rejected/);
+  });
+
   it('reports refresh_failed when the refresh endpoint rejects', async () => {
     server.use(
       http.post(TOKEN_URL, () => new HttpResponse(null, { status: 400 })),
@@ -270,6 +303,13 @@ describe('auth.status', () => {
     if (result.authenticated) throw new Error('unreachable');
     expect(result.reason).toBe('revoked');
     expect(result.message).toMatch(/rejected/);
+  });
+
+  it('tokenDigest returns a stable 8-hex-char prefix', () => {
+    const d = tokenDigest('ghu_test');
+    expect(d).toMatch(/^[0-9a-f]{8}$/);
+    expect(tokenDigest('ghu_test')).toBe(d);
+    expect(tokenDigest('different')).not.toBe(d);
   });
 
   it('recovers from 401 by refreshing and re-probing', async () => {

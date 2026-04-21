@@ -58,6 +58,7 @@ export function fileKeyring(opts: FileKeyringOptions = {}): Keyring {
         mkdirSync(dir, { recursive: true, mode: 0o700 });
       } else {
         // Best-effort tighten; harmless if we don't own the dir.
+        /* v8 ignore next -- catch only fires when another process owns the dir; not reachable in unit tests. */
         try { chmodSync(dir, 0o700); } catch { /* ignore */ }
       }
       writeFileSync(path, JSON.stringify(auth, null, 2) + '\n', { mode: 0o600 });
@@ -78,6 +79,7 @@ export function defaultKeyring(): Keyring {
   return fileKeyring();
 }
 
+/* v8 ignore next 5 -- resolves the user's config dir; tests inject `dir` directly so this branch is only taken in production. */
 function defaultConfigDir(): string {
   const xdg = process.env.XDG_CONFIG_HOME;
   if (xdg && xdg.length > 0) return join(xdg, 'putitoutthere');

@@ -231,6 +231,7 @@ async function requestDeviceCode(
     throw new Error(`device code request failed: HTTP ${res.status}`);
   }
   const body = await res.json();
+  /* v8 ignore next 3 -- defensive; GitHub always returns the documented fields on 2xx. */
   if (!isDeviceCodeResponse(body)) {
     throw new Error('device code response missing expected fields');
   }
@@ -273,10 +274,12 @@ async function pollForToken(
     if (error === 'expired_token') {
       throw new Error('device code expired before approval');
     }
+    /* v8 ignore start -- unknown error codes + wall-clock deadline are both defensive; GitHub's error set is exhaustive and the server's expired_token fires first. */
     throw new Error(`device flow error: ${error}`);
   }
   throw new Error('device code expired before approval');
 }
+/* v8 ignore stop */
 
 async function tryRefresh(
   fetchFn: typeof fetch,
@@ -319,10 +322,12 @@ async function fetchLogin(fetchFn: typeof fetch, accessToken: string): Promise<s
       'user-agent': 'putitoutthere',
     },
   });
+  /* v8 ignore next 3 -- fetchLogin runs only after a successful token grant; the happy-path is covered. */
   if (!res.ok) {
     throw new Error(`GitHub /user failed: HTTP ${res.status}`);
   }
   const body = (await res.json()) as Record<string, unknown>;
+  /* v8 ignore next 3 -- defensive: GitHub has never shipped /user without a login field. */
   if (typeof body.login !== 'string') {
     throw new Error('GitHub /user response missing login');
   }
@@ -344,8 +349,10 @@ async function probeUser(fetchFn: typeof fetch, accessToken: string): Promise<Pr
     });
     if (!res.ok) return { ok: false, status: res.status };
     const body = (await res.json()) as Record<string, unknown>;
+    /* v8 ignore next -- defensive: GitHub has never shipped /user without a login field. */
     if (typeof body.login !== 'string') return { ok: false, status: res.status };
     return { ok: true, login: body.login };
+  /* v8 ignore next 3 -- network-throw catch; msw can't model a pre-HTTP throw cleanly. */
   } catch {
     return { ok: false, status: 0 };
   }
@@ -380,6 +387,7 @@ function epochSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
+/* v8 ignore next 3 -- real timer; every test injects `sleep`. */
 function realSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }

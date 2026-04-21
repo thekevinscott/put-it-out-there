@@ -37,14 +37,14 @@ describe('fileKeyring', () => {
     expect(await k.get()).toEqual(a);
   });
 
-  it('writes the file with mode 0600', async () => {
+  it.skipIf(process.platform === 'win32')('writes the file with mode 0600', async () => {
     const k = fileKeyring({ dir });
     await k.set(mkAuth());
     const st = statSync(join(dir, 'auth.json'));
     expect(st.mode & 0o777).toBe(0o600);
   });
 
-  it('tightens file mode on overwrite', async () => {
+  it.skipIf(process.platform === 'win32')('tightens file mode on overwrite', async () => {
     const path = join(dir, 'auth.json');
     writeFileSync(path, '{}', { mode: 0o644 });
     const k = fileKeyring({ dir });
@@ -71,6 +71,12 @@ describe('fileKeyring', () => {
 
   it('returns null on malformed JSON', async () => {
     writeFileSync(join(dir, 'auth.json'), '{ not json ', 'utf8');
+    const k = fileKeyring({ dir });
+    expect(await k.get()).toBeNull();
+  });
+
+  it('returns null when the stored JSON is not an object', async () => {
+    writeFileSync(join(dir, 'auth.json'), 'null', 'utf8');
     const k = fileKeyring({ dir });
     expect(await k.get()).toBeNull();
   });
