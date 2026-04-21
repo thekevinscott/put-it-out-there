@@ -91,6 +91,19 @@ describe('putitoutthere-check.yml', () => {
   });
 });
 
+describe('TOML_SKELETON', () => {
+  it('uses `**/Cargo.{toml,lock}` so nested workspace manifests cascade (#128)', () => {
+    // Globs are root-anchored (minimatch matchBase:false); a bare
+    // `Cargo.toml` only matches the repo-root file and misses nested
+    // manifests. The skeleton must prepend `**/` for users to copy-paste
+    // safely in workspaces.
+    expect(TOML_SKELETON).toContain('**/Cargo.toml');
+    expect(TOML_SKELETON).toContain('**/Cargo.lock');
+    expect(TOML_SKELETON).not.toMatch(/"Cargo\.toml"/);
+    expect(TOML_SKELETON).not.toMatch(/"Cargo\.lock"/);
+  });
+});
+
 describe('releaseYml(cadence)', () => {
   it('returns immediate when cadence="immediate"', () => {
     expect(releaseYml('immediate')).toBe(RELEASE_YML_IMMEDIATE);
