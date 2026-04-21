@@ -135,7 +135,7 @@ describe('dumpFailure: redaction', () => {
     );
     const md = readFileSync(summaryPath, 'utf8');
     expect(md).not.toContain('tok-abc-123');
-    expect(md).toContain('[REDACTED]');
+    expect(md).toMatch(/\[REDACTED:[0-9a-f]{8}\]/);
   });
 
   it('redacts secrets from stdout too', () => {
