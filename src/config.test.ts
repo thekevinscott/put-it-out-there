@@ -526,6 +526,19 @@ describe('parseConfig: TOML errors', () => {
   it('surfaces a clear error for malformed TOML', () => {
     expect(() => parseConfig('not = valid = toml')).toThrow();
   });
+
+  it('preserves the underlying parse error as `cause`', () => {
+    // @eslint/js 10 enabled `preserve-caught-error` by default; this
+    // test pins the cause-chain contract so a future refactor doesn't
+    // accidentally drop the inner error.
+    try {
+      parseConfig('not = valid = toml');
+      throw new Error('expected parseConfig to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).cause).toBeInstanceOf(Error);
+    }
+  });
 });
 
 describe('loadConfig: filesystem', () => {

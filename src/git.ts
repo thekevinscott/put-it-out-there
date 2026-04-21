@@ -36,7 +36,7 @@ function run(args: string[], opts: GitOptions = {}): string {
     /* v8 ignore start -- defensive: execFileSync always throws Error with .stderr */
     const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
     const base = err instanceof Error ? err.message : String(err);
-    throw new Error(stderr ? `${base}\n${stderr}` : base);
+    throw new Error(stderr ? `${base}\n${stderr}` : base, { cause: err });
     /* v8 ignore stop */
   }
 }

@@ -94,7 +94,7 @@ function runGit(args: string[], cwd: string): string {
     /* v8 ignore start -- defensive wrap */
   } catch (err) {
     const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8') ?? '';
-    throw new Error(`git ${args.join(' ')} failed: ${stderr.trim()}`);
+    throw new Error(`git ${args.join(' ')} failed: ${stderr.trim()}`, { cause: err });
   }
   /* v8 ignore stop */
 }
