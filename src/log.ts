@@ -4,7 +4,9 @@
  * JSON-per-line output in CI; human-readable text in TTYs. Every emitted
  * line is passed through a redactor that replaces any occurrence of a
  * known-secret env value (keys matching *TOKEN* / *SECRET* / *PASSWORD*
- * / *KEY*, case-insensitive) with `[REDACTED]`.
+ * / *KEY*, case-insensitive) with `[REDACTED:<digest>]`, where `<digest>`
+ * is a stable 8-hex-char SHA-256 prefix (#134). Operators can correlate
+ * rotated tokens across log lines without ever seeing the value.
  *
  * Substring redaction (rather than Pino-style field-path redaction) is
  * deliberate: handlers capture child-process stdout/stderr and feed it
@@ -15,6 +17,8 @@
  */
 
 import type { Writable } from 'node:stream';
+
+import { tokenDigest } from './auth.js';
 import type { Logger } from './types.js';
 
 export type Level = 'debug' | 'info' | 'warn' | 'error';
@@ -79,10 +83,12 @@ function formatScalar(v: unknown): string {
 /* ----------------------------- redaction ----------------------------- */
 
 const SECRET_KEY = /TOKEN|SECRET|PASSWORD|KEY/i;
-const REDACTED = '[REDACTED]';
 
 /**
- * Replace every occurrence of a known-secret env value with `[REDACTED]`.
+ * Replace every occurrence of a known-secret env value with
+ * `[REDACTED:<digest>]` where `<digest>` is a stable 8-hex-char
+ * SHA-256 prefix of the token. Operators can correlate rotated
+ * tokens across log lines without ever seeing the value itself.
  * Empty / single-char values are skipped to avoid mangling unrelated
  * characters. Called on every log write.
  */
@@ -94,7 +100,7 @@ export function redact(s: string): string {
     if (!out.includes(v)) continue;
     // String.replaceAll expects a literal or a RegExp; use split/join to
     // avoid regex escaping every secret value.
-    out = out.split(v).join(REDACTED);
+    out = out.split(v).join(`[REDACTED:${tokenDigest(v)}]`);
   }
   return out;
 }

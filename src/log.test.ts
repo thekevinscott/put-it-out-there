@@ -74,7 +74,21 @@ describe('createLogger: redaction (§22.5)', () => {
     log.info('saw token: super-sensitive-value in response');
     const line = dest.text;
     expect(line).not.toContain('super-sensitive-value');
-    expect(line).toContain('[REDACTED]');
+    // #134: redactor uses digest-based markers so rotated tokens stay
+    // distinguishable in logs without leaking the value.
+    expect(line).toMatch(/\[REDACTED:[0-9a-f]{8}\]/);
+  });
+
+  it('uses a stable per-token digest marker so rotated tokens are distinguishable (#134)', () => {
+    process.env.A_SECRET_TOKEN = 'first-token-value';
+    process.env.B_SECRET_TOKEN = 'second-token-value';
+    const dest = new BufStream();
+    const log = createLogger({ stream: dest, pretty: false });
+    log.info('both here: first-token-value then second-token-value');
+    const line = dest.text;
+    const markers = [...line.matchAll(/\[REDACTED:([0-9a-f]{8})\]/g)].map((m) => m[1]);
+    expect(markers).toHaveLength(2);
+    expect(markers[0]).not.toBe(markers[1]);
   });
 
   it('redacts values from keys matching *TOKEN*, *SECRET*, *PASSWORD*, *KEY*', () => {
