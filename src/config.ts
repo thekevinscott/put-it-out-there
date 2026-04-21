@@ -53,7 +53,7 @@ const PYPI_PKG = z
     ...PACKAGE_BASE,
     kind: z.literal('pypi'),
     pypi: z.string().optional(),
-    build: PYPI_BUILD.optional(),
+    build: PYPI_BUILD.default('setuptools'),
     wheels_artifact: z.string().optional(),
     targets: z.array(z.string()).optional(),
   })

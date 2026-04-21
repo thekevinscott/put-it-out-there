@@ -139,7 +139,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
       ];
 
     case 'pypi': {
-      const build = (pkg as { build?: string }).build;
+      const build = pkg.build;
       const targets = (pkg as { targets?: string[] }).targets ?? [];
       const out: MatrixRow[] = [];
       if (build === 'maturin' && targets.length > 0) {
@@ -167,7 +167,7 @@ function rowsForPackage(pkg: Package, version: string): MatrixRow[] {
         artifact_name: `${pkg.name}-sdist`,
         artifact_path: `${pkg.path}/dist/*.tar.gz`,
         path: pkg.path,
-        ...(build !== undefined ? { build } : {}),
+        build,
       });
       return out;
     }

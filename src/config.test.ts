@@ -427,6 +427,20 @@ target = ["x86_64-unknown-linux-gnu"]
     ).toThrow(/target/i);
   });
 
+  it('defaults pypi.build to "setuptools" when unset (#129)', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "x"
+kind  = "pypi"
+path  = "."
+paths = ["**"]
+`);
+    const pkg = cfg.packages[0]! as { build?: string };
+    expect(pkg.build).toBe('setuptools');
+  });
+
   it('accepts pypi fields: pypi, build, wheels_artifact', () => {
     const cfg = parseConfig(`
 [putitoutthere]

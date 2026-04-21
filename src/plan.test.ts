@@ -294,6 +294,29 @@ describe('plan: npm kinds', () => {
   });
 });
 
+describe('plan: pypi build defaulting (#129)', () => {
+  it('sdist rows carry build = "setuptools" when pypi.build is unset', async () => {
+    const PYPI_NO_BUILD_TOML = `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "lib-py"
+kind  = "pypi"
+path  = "packages/python"
+paths = ["packages/python/**"]
+`;
+    writeFileSync(join(repo, 'putitoutthere.toml'), PYPI_NO_BUILD_TOML, 'utf8');
+    commit('feat: initial', { 'packages/python/lib.py': '# python' });
+
+    const matrix = await plan({ cwd: repo });
+    expect(matrix).toHaveLength(1);
+    const sdist = matrix[0]!;
+    expect(sdist.target).toBe('sdist');
+    expect(sdist.build).toBe('setuptools');
+  });
+});
+
 describe('plan: matrix row shape', () => {
   it('every row has the required fields', async () => {
     writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML, 'utf8');
