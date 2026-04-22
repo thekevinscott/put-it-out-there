@@ -13,18 +13,22 @@
 #      session's failure mode. Kept for coverage.
 #
 #   2. "isolated" fixtures (dirsql-isolated, …) — probe runs in a
-#      cloned copy of the target consumer repo (e.g. dirsql), with
-#      piot strictly off-disk and unrestricted tool access. This
-#      faithfully mirrors the session that motivated #164: dirsql on
-#      filesystem, piot as black box accessed only via the web.
-#      Fixtures of this shape ship a setup.sh that populates the
-#      working directory; spike.sh detects and invokes it, then cd's
-#      into the checkout before calling `claude -p`. The scope arg is
-#      ignored — the invariant is "no restrictions" to match the
-#      original session.
+#      cloned copy of the target consumer repo (e.g. dirsql) with
+#      piot's `docs/` markdown tree copied in alongside as
+#      `./piot-docs/`. Path-scoped Read/Grep/Glob and a strict
+#      permissions file keep the probe from reaching piot's source
+#      on the host — the probe's only view of piot is what its
+#      published docs say. `settings.local.json` in the workdir
+#      denies Bash entirely (to close `cat /abs/path` escapes) and
+#      denies reads under `/home` / `/root` / `/etc`.
+#      (VitePress served over localhost was considered and dropped
+#      because Claude Code's WebFetch refuses `http://localhost`
+#      URLs as invalid.)
 #
 # Which shape a fixture uses is inferred from the presence of
-# `fixtures/<name>/setup.sh`.
+# `fixtures/<name>/setup.sh`; the docs-copy opt-in is inferred from
+# `fixtures/<name>/docs_server` (retained name, now triggers a docs
+# tree copy rather than a live server).
 #
 # Usage:
 #   ./evals/spike.sh [fixture] [scope]
@@ -32,7 +36,8 @@
 #   ./evals/spike.sh dirsql-scope-blinder websearch
 #
 # Requires: `claude` CLI on $PATH; Anthropic API access; `git` for
-# isolated fixtures that clone a consumer repo.
+# isolated fixtures that clone a consumer repo; `pnpm` + docs deps
+# installed (`pnpm install --dir docs`) for docs-server fixtures.
 # Not wired into CI yet; see issue #164.
 
 set -euo pipefail
@@ -40,6 +45,7 @@ set -euo pipefail
 FIXTURE="${1:-dirsql-scope}"
 SCOPE="${2:-webfetch}"
 EVAL_ROOT="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$EVAL_ROOT/.." && pwd)"
 FIXTURE_DIR="$EVAL_ROOT/fixtures/$FIXTURE"
 SNAP_DIR="$EVAL_ROOT/snapshots"
 TS="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
@@ -55,15 +61,16 @@ if [[ ! -f "$FIXTURE_DIR/expected.json" ]]; then
   exit 1
 fi
 
-# Isolation shape is inferred from the presence of setup.sh. Isolated
-# fixtures override the scope arg — the motivating session had no tool
-# restrictions, so faithful replay means we also don't restrict.
+# Shape is inferred from setup.sh; docs-server opt-in from docs_server marker.
+SHAPE="scope"
+DOCS_SERVER="no"
 if [[ -x "$FIXTURE_DIR/setup.sh" ]]; then
   SHAPE="isolated"
   VARIANT="$FIXTURE"
-  ALLOWED_TOOLS=""
+  if [[ -f "$FIXTURE_DIR/docs_server" ]]; then
+    DOCS_SERVER="yes"
+  fi
 else
-  SHAPE="scope"
   VARIANT="${FIXTURE}__${SCOPE}"
   case "$SCOPE" in
     webfetch)   ALLOWED_TOOLS="WebSearch WebFetch" ;;
@@ -82,17 +89,79 @@ GRADE="$SNAP_DIR/${VARIANT}-${TS}-grade.json"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# Substitute {{DOCS_PATH}} in prompt if the fixture opted into docs copy.
+PROMPT_TEXT="$(cat "$FIXTURE_DIR/prompt.md")"
+DOCS_PATH=""
+if [[ "$DOCS_SERVER" == "yes" ]]; then
+  DOCS_PATH="./piot-docs"
+  PROMPT_TEXT="${PROMPT_TEXT//\{\{DOCS_PATH\}\}/$DOCS_PATH}"
+fi
+
 if [[ "$SHAPE" == "isolated" ]]; then
   echo "==> setup: running $FIXTURE_DIR/setup.sh $WORK"
   "$FIXTURE_DIR/setup.sh" "$WORK"
-  echo "==> probe: variant=$VARIANT (Opus 4.7, unrestricted tools, cwd=$WORK)"
+  if [[ "$DOCS_SERVER" == "yes" ]]; then
+    echo "==> docs: copying piot's docs/ into $WORK/piot-docs (a run-time snapshot)"
+    cp -r "$REPO_ROOT/docs" "$WORK/piot-docs"
+    # Strip the local node_modules and build output; the agent should
+    # see markdown sources only, not rendered HTML or vendored deps.
+    rm -rf "$WORK/piot-docs/node_modules" "$WORK/piot-docs/.vitepress/dist" \
+           "$WORK/piot-docs/.vitepress/cache" 2>/dev/null || true
+  fi
   cd "$WORK"
-  claude -p \
-    --model claude-opus-4-7 \
-    --max-budget-usd 3 \
-    --output-format text \
-    "$(cat "$FIXTURE_DIR/prompt.md")" \
-    > "$RAW"
+  if [[ "$DOCS_SERVER" == "yes" ]]; then
+    # Lock the probe: reads/grep/glob allowed anywhere except /home, /root,
+    # /etc (hides piot's canonical source tree on the host); WebFetch and
+    # WebSearch denied (agent must use the docs copied into ./piot-docs/);
+    # Bash denied entirely (closes `cat /abs/path`, `git --git-dir=…`
+    # escapes). The agent's only view of piot is the docs snapshot in
+    # ./piot-docs/.
+    mkdir -p "$WORK/.claude"
+    cat > "$WORK/.claude/settings.local.json" <<'EOF'
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob"
+    ],
+    "deny": [
+      "Read(/home/**)",
+      "Read(/root/**)",
+      "Read(/etc/**)",
+      "Grep(/home/**)",
+      "Grep(/root/**)",
+      "Grep(/etc/**)",
+      "Glob(/home/**)",
+      "Glob(/root/**)",
+      "Glob(/etc/**)",
+      "Bash",
+      "WebFetch",
+      "WebSearch"
+    ]
+  }
+}
+EOF
+    echo "==> probe: variant=$VARIANT (Opus 4.7, scoped reads, no Bash/web, docs → ./piot-docs/)"
+    # HOME=$WORK isolates the probe from the host's ~/.claude (notably a
+    # global Stop hook that otherwise fires in the probe's context and
+    # derails the eval with git-status prompts). Probe reads only the
+    # settings.local.json we wrote above.
+    HOME="$WORK" claude -p \
+      --model claude-opus-4-7 \
+      --max-budget-usd 3 \
+      --output-format text \
+      "$PROMPT_TEXT" \
+      > "$RAW"
+  else
+    echo "==> probe: variant=$VARIANT (Opus 4.7, unrestricted tools, cwd=$WORK)"
+    claude -p \
+      --model claude-opus-4-7 \
+      --max-budget-usd 3 \
+      --output-format text \
+      "$PROMPT_TEXT" \
+      > "$RAW"
+  fi
 else
   echo "==> probe: variant=$VARIANT (Opus 4.7, tools: $ALLOWED_TOOLS)"
   cd "$WORK"
@@ -102,7 +171,7 @@ else
     --allowed-tools "$ALLOWED_TOOLS" \
     --max-budget-usd 3 \
     --output-format text \
-    "$(cat "$FIXTURE_DIR/prompt.md")" \
+    "$PROMPT_TEXT" \
     > "$RAW"
 fi
 
@@ -149,7 +218,11 @@ Evaluation follows.
 EOF
 )
 
-claude -p \
+# Extractor also needs HOME isolation — otherwise the host's global Stop
+# hook fires (cwd is $WORK, which has an uncommitted dirsql clone + the
+# piot-docs copy), and Haiku returns a reply to the hook instead of the
+# JSON object we asked for.
+HOME="$WORK" claude -p \
   --model claude-haiku-4-5-20251001 \
   --tools "" \
   --max-budget-usd 1 \
@@ -197,6 +270,8 @@ grade = {
     'variant': '$VARIANT',
     'timestamp': '$TS',
     'model': 'claude-opus-4-7',
+    'docs_server': '$DOCS_SERVER',
+    'docs_path': '$DOCS_PATH',
     'pass': len(fails) == 0,
     'score': f'{len(expected) - len(fails)}/{len(expected)}',
     'results': results,

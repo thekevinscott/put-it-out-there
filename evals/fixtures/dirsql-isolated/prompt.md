@@ -1,11 +1,5 @@
-There's a handoff note for this repo's migration onto `putitoutthere` (piot) at
-<https://github.com/thekevinscott/put-it-out-there/blob/main/notes/handoff/2026-04-21-dirsql-migration.md>.
-Read it, then take a look at our existing release process. What do you think about this scope of work?
+Take a look at our existing release process — we have a bunch of release machinery in `.github/workflows/` and the supporting Python scripts. What do you think about the scope of work involved here?
 
-Also — the whole idea behind piot, which is a single library that I am
-authoring, was to abstract out the release process explored here so that
-other packages could consume it too. If there are gaps or blockers that
-prevent us from leveraging it (and ideally installing it easily) those
-need to be highlighted and addressed. Because the whole point was to
-avoid the day of work it took to figure out the release process for
-this library.
+Also — I'm authoring a library called `putitoutthere` (piot) whose whole idea is to abstract out the release process explored here so that other packages could consume it too. A snapshot of piot's published docs is in `{{DOCS_PATH}}/` alongside this repo; read them there. If there are gaps or blockers that prevent us from leveraging piot (and ideally installing it easily) those need to be highlighted and addressed. Because the whole point was to avoid the day of work it took to figure out the release process for this library.
+
+Investigate piot's docs, then give me a real evaluation: what does piot already cover, what's missing, and what would need to change for dirsql to adopt it. Be specific and cite evidence. Don't hedge — reach concrete conclusions.
