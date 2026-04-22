@@ -38,6 +38,15 @@ Inside a single release, packages publish in **topological order** of their `dep
 
 Every handler's first move is `isPublished` — check the registry for the target version. Already there? Skip cleanly. Lets you re-run failed releases without fighting the registry's immutable-publish semantics.
 
+## Packaging shapes
+
+Each `[[package]]` declares a `kind` (`crates` / `pypi` / `npm`) and, for some kinds, a `build` mode that picks a packaging shape piot knows how to publish. The `build` value is **declarative**: it tells piot what to do at publish time, not how to compile. Producing the binaries is your workflow's job.
+
+- `kind = "crates"` — plain `cargo publish`.
+- `kind = "pypi"` with `build = "setuptools" | "hatch" | "maturin"` — sdist + wheel from an existing manifest.
+- `kind = "npm"` vanilla (no `build`) — single-package `npm publish --provenance`.
+- `kind = "npm"` with `build = "napi" | "bundled-cli"` — platform-package family (per-platform `{name}-{target}` sub-packages + a top-level with `optionalDependencies` pinning them). See [npm platform packages](/guide/npm-platform-packages).
+
 ## Dirty working tree
 
 `putitoutthere` rewrites the version field in each package's manifest (`Cargo.toml`, `pyproject.toml`, `package.json`) right before publishing. That edit is intentional and not committed — the release tag points at the unmodified merge commit (see [cascade](/guide/cascade)).

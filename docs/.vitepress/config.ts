@@ -25,6 +25,13 @@ export default defineConfig({
             { text: 'Authentication', link: '/guide/auth' },
             { text: 'Release trailer', link: '/guide/trailer' },
             { text: 'Cascade', link: '/guide/cascade' },
+            { text: 'npm platform packages', link: '/guide/npm-platform-packages' },
+          ],
+        },
+        {
+          text: 'Handoff guides',
+          items: [
+            { text: 'Polyglot Rust library (dirsql shape)', link: '/guide/handoffs/polyglot-rust' },
           ],
         },
       ],
