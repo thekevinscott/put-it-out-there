@@ -1,29 +1,38 @@
 #!/usr/bin/env bash
 # Agent-behavior eval spike.
 #
-# Runs a condensed single-turn probe against a fixture and grades the
-# output against its expected.json. Two axes vary independently:
+# Runs a single-turn probe against a fixture and grades the output
+# against its expected.json.
 #
-#   1. Fixture — picks the prompt (leading vs. blinder).
-#        dirsql-scope          — names dirsql's specific pain points.
-#        dirsql-scope-blinder  — gives only structural context.
-#   2. Scope — picks the probe's tool access.
-#        webfetch   (default) — WebSearch + WebFetch (source-code reachable
-#                               via raw.githubusercontent.com).
-#        websearch            — WebSearch only (docs-site snippets only;
-#                               closer to what the original dirsql session
-#                               agent actually exercised).
+# Two fixture shapes exist:
 #
-# Output snapshot name is `<fixture>__<scope>-<ts>-*`. Each variant grades
-# independently against the same ground-truth expected.json; comparing
-# scores across variants tells us whether failures are prompt-driven
-# (leading vs. blinder) or tool-driven (WebFetch visibility).
+#   1. "scope" fixtures (dirsql-scope, dirsql-scope-blinder) — probe
+#      runs in a scratch dir with only web tools. Uses the `scope` arg
+#      (`webfetch` | `websearch`) to vary tool access. This is a
+#      docs-regression harness, not a reproduction of the motivating
+#      session's failure mode. Kept for coverage.
+#
+#   2. "isolated" fixtures (dirsql-isolated, …) — probe runs in a
+#      cloned copy of the target consumer repo (e.g. dirsql), with
+#      piot strictly off-disk and unrestricted tool access. This
+#      faithfully mirrors the session that motivated #164: dirsql on
+#      filesystem, piot as black box accessed only via the web.
+#      Fixtures of this shape ship a setup.sh that populates the
+#      working directory; spike.sh detects and invokes it, then cd's
+#      into the checkout before calling `claude -p`. The scope arg is
+#      ignored — the invariant is "no restrictions" to match the
+#      original session.
+#
+# Which shape a fixture uses is inferred from the presence of
+# `fixtures/<name>/setup.sh`.
 #
 # Usage:
 #   ./evals/spike.sh [fixture] [scope]
+#   ./evals/spike.sh dirsql-isolated
 #   ./evals/spike.sh dirsql-scope-blinder websearch
 #
-# Requires: `claude` CLI on $PATH; Anthropic API access.
+# Requires: `claude` CLI on $PATH; Anthropic API access; `git` for
+# isolated fixtures that clone a consumer repo.
 # Not wired into CI yet; see issue #164.
 
 set -euo pipefail
@@ -34,19 +43,6 @@ EVAL_ROOT="$(cd "$(dirname "$0")" && pwd)"
 FIXTURE_DIR="$EVAL_ROOT/fixtures/$FIXTURE"
 SNAP_DIR="$EVAL_ROOT/snapshots"
 TS="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
-VARIANT="${FIXTURE}__${SCOPE}"
-RAW="$SNAP_DIR/${VARIANT}-${TS}-raw.md"
-EXTRACT="$SNAP_DIR/${VARIANT}-${TS}-extracted.json"
-GRADE="$SNAP_DIR/${VARIANT}-${TS}-grade.json"
-
-case "$SCOPE" in
-  webfetch)   ALLOWED_TOOLS="WebSearch WebFetch" ;;
-  websearch)  ALLOWED_TOOLS="WebSearch" ;;
-  *)
-    echo "ERROR: unknown scope '$SCOPE'. Expected: webfetch | websearch" >&2
-    exit 1
-    ;;
-esac
 
 mkdir -p "$SNAP_DIR"
 
@@ -59,20 +55,56 @@ if [[ ! -f "$FIXTURE_DIR/expected.json" ]]; then
   exit 1
 fi
 
-# Isolate from the project CLAUDE.md by running from a scratch dir.
+# Isolation shape is inferred from the presence of setup.sh. Isolated
+# fixtures override the scope arg — the motivating session had no tool
+# restrictions, so faithful replay means we also don't restrict.
+if [[ -x "$FIXTURE_DIR/setup.sh" ]]; then
+  SHAPE="isolated"
+  VARIANT="$FIXTURE"
+  ALLOWED_TOOLS=""
+else
+  SHAPE="scope"
+  VARIANT="${FIXTURE}__${SCOPE}"
+  case "$SCOPE" in
+    webfetch)   ALLOWED_TOOLS="WebSearch WebFetch" ;;
+    websearch)  ALLOWED_TOOLS="WebSearch" ;;
+    *)
+      echo "ERROR: unknown scope '$SCOPE'. Expected: webfetch | websearch" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+RAW="$SNAP_DIR/${VARIANT}-${TS}-raw.md"
+EXTRACT="$SNAP_DIR/${VARIANT}-${TS}-extracted.json"
+GRADE="$SNAP_DIR/${VARIANT}-${TS}-grade.json"
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-echo "==> probe: variant=$VARIANT (Opus 4.7, tools: $ALLOWED_TOOLS)"
-cd "$WORK"
-claude -p \
-  --model claude-opus-4-7 \
-  --tools "$(echo "$ALLOWED_TOOLS" | tr ' ' ',')" \
-  --allowed-tools "$ALLOWED_TOOLS" \
-  --max-budget-usd 3 \
-  --output-format text \
-  "$(cat "$FIXTURE_DIR/prompt.md")" \
-  > "$RAW"
+if [[ "$SHAPE" == "isolated" ]]; then
+  echo "==> setup: running $FIXTURE_DIR/setup.sh $WORK"
+  "$FIXTURE_DIR/setup.sh" "$WORK"
+  echo "==> probe: variant=$VARIANT (Opus 4.7, unrestricted tools, cwd=$WORK)"
+  cd "$WORK"
+  claude -p \
+    --model claude-opus-4-7 \
+    --max-budget-usd 3 \
+    --output-format text \
+    "$(cat "$FIXTURE_DIR/prompt.md")" \
+    > "$RAW"
+else
+  echo "==> probe: variant=$VARIANT (Opus 4.7, tools: $ALLOWED_TOOLS)"
+  cd "$WORK"
+  claude -p \
+    --model claude-opus-4-7 \
+    --tools "$(echo "$ALLOWED_TOOLS" | tr ' ' ',')" \
+    --allowed-tools "$ALLOWED_TOOLS" \
+    --max-budget-usd 3 \
+    --output-format text \
+    "$(cat "$FIXTURE_DIR/prompt.md")" \
+    > "$RAW"
+fi
 
 echo "    raw output: $RAW ($(wc -l < "$RAW") lines)"
 
@@ -151,7 +183,7 @@ expected = json.load(open('$FIXTURE_DIR/expected.json'))['primitives']
 results = {}
 fails = []
 for key, spec in expected.items():
-    truth = spec['truth']  # 'shipped' or 'missing'
+    truth = spec['truth']
     claim = extracted.get(key, 'not_mentioned')
     ok = (claim == truth)
     results[key] = {'truth': truth, 'claim': claim, 'pass': ok}
@@ -160,6 +192,7 @@ for key, spec in expected.items():
 
 grade = {
     'fixture': '$FIXTURE',
+    'shape': '$SHAPE',
     'scope': '$SCOPE',
     'variant': '$VARIANT',
     'timestamp': '$TS',
