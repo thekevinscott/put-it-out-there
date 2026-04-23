@@ -322,6 +322,55 @@ first_version = "0.1.0"
   });
 
   // #89: `--artifacts` walks the plan and prints a present-vs-missing table.
+  it('doctor: renders the trust-policy phase with pass/fail per workflow (#162)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'doctor-cli-trustpolicy-'));
+    try {
+      writeFileSync(
+        join(dir, 'putitoutthere.toml'),
+        `[putitoutthere]
+version = 1
+[[package]]
+name  = "a"
+kind  = "crates"
+path  = "a"
+paths = ["**"]
+`,
+        'utf8',
+      );
+      mkdirSync(join(dir, '.github', 'workflows'), { recursive: true });
+      // Workflow missing id-token: write and environment.
+      writeFileSync(
+        join(dir, '.github', 'workflows', 'release.yml'),
+        `jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - run: putitoutthere publish
+`,
+        'utf8',
+      );
+      process.env.CARGO_REGISTRY_TOKEN = 'tok';
+      const stdoutChunks: string[] = [];
+      vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+        stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+      const code = await run(['node', 'putitoutthere', 'doctor', '--cwd', dir]);
+      expect(code).toBe(1);
+      const out = stdoutChunks.join('');
+      expect(out).toMatch(/trust policy \(local\)/);
+      expect(out).toMatch(/release\.yml/);
+      expect(out).toMatch(/id-token: write/);
+      // Scope disclaimer must be rendered so green output isn't misread.
+      expect(out).toMatch(/does NOT diff workflow filename/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      delete process.env.CARGO_REGISTRY_TOKEN;
+    }
+  });
+
   it('doctor: --artifacts prints a table with expected layout for missing rows', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'doctor-cli-artifacts-'));
     try {

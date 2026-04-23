@@ -45,6 +45,41 @@ permissions:
 
 `id-token: write` is the permission that lets GitHub mint the OIDC JWT that every registry's trusted-publisher check consumes. Without it, all three exchanges fail.
 
+## Validating the trust-policy setup locally (`doctor`)
+
+`putitoutthere doctor` runs a **trust policy (local)** phase that checks the structural prerequisites every registry's trusted-publisher flow requires. It runs entirely off `.github/workflows/*.yml` — no registry API calls, no secrets.
+
+Today, the phase validates:
+
+- **A publish workflow exists.** At least one workflow file under `.github/workflows/` invokes `putitoutthere publish` (as a `run:` step) or uses `thekevinscott/put-it-out-there@...` with `command: publish`.
+- **Required permissions.** The publishing job declares (or inherits from the workflow) `id-token: write` and `contents: write`. Missing either breaks the OIDC exchange with an opaque HTTP 400.
+- **An environment is pinned.** The publishing job has an `environment:` key. Most trust policies pin an environment; if the job doesn't set one, the registry policy check will reject the OIDC token.
+- **A publish step is actually live.** The publishing step isn't commented out — a common state after a temporary rollback.
+
+Run it as a pre-publish gate in your workflow:
+
+```yaml
+- name: Validate trust-policy setup
+  run: npx putitoutthere doctor
+```
+
+It exits non-zero on any failure. Sample failing output:
+
+```
+trust policy (local):
+  ✗ publish workflow: release.yml
+      trust-policy: release.yml: job `publish` is missing `id-token: write` permission — add it to the job or to workflow-level `permissions:`
+      trust-policy: release.yml: job `publish` has no `environment:` key — many trust policies pin an environment; add one (e.g. `environment: release`) matching the registry registration
+  note: `doctor` does NOT diff workflow filename or environment name against each registry's trust policy. Renaming the workflow or environment will still break publish with HTTP 400 until the registry registration is updated.
+```
+
+### What `doctor` does **not** yet check
+
+- **Workflow filename matches each registry's registration.** If you rename `release.yml` → `patch-release.yml`, every trust policy pointing at `release.yml` will reject the token. `doctor` can't catch this today because it has no view of what each registry has registered.
+- **Environment name matches each registry's registration.** Same caveat — `doctor` checks that *an* environment is set, not that the name matches.
+
+Both are tracked under a follow-up to issue [#162](https://github.com/thekevinscott/put-it-out-there/issues/162) (see the issue titled "doctor: diff workflow filename + environment name against registry trust policy"). Until that lands, treat a green `doctor` output as *necessary but not sufficient* — rename safety still requires a manual cross-check with each registry's trusted-publisher settings page.
+
 ## Fallback: long-lived tokens
 
 When trusted publishing isn't an option — first-ever publish, air-gapped CI, self-hosted runners without OIDC, private registries — you can still use env-var tokens. `putitoutthere` accepts:

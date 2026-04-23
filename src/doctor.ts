@@ -19,6 +19,13 @@ import { join } from 'node:path';
 
 import { expectedLayout, type MatrixRow } from './completeness.js';
 import { loadConfig, type Package } from './config.js';
+import {
+  checkEnvironment,
+  checkPermissions,
+  checkPublishInvocation,
+  findPublishWorkflows,
+  type WorkflowFile,
+} from './oidc-policy.js';
 import { plan } from './plan.js';
 import { checkAuth, type AuthResult } from './preflight.js';
 import { deepCheck, type DeepCheckRow, type InspectFn } from './token-scope.js';
@@ -55,6 +62,22 @@ export interface DoctorReport {
     artifact_name: string;
     present: boolean;
     expected: string;
+  }>;
+  /**
+   * Trust-policy (local) check results. See `checkTrustPolicyLocal`.
+   * `undefined` when no publish workflow was found (e.g. a bare repo
+   * with no `.github/workflows/` yet — no signal, no noise).
+   */
+  trustPolicy?: TrustPolicyReport;
+}
+
+export interface TrustPolicyReport {
+  workflows: Array<{
+    filename: string;
+    permissions_ok: boolean;
+    environment_ok: boolean;
+    invocation_ok: boolean;
+    issues: string[];
   }>;
 }
 
@@ -127,13 +150,76 @@ export async function doctor(opts: DoctorOptions): Promise<DoctorReport> {
     ? await checkArtifacts(opts, cfgPath, issues)
     : undefined;
 
+  const trustPolicy = checkTrustPolicyLocal(opts.cwd, issues);
+
   return {
     ok: issues.length === 0,
     issues,
     packages,
     ...(artifacts !== undefined ? { artifacts } : {}),
+    ...(trustPolicy !== undefined ? { trustPolicy } : {}),
   };
 }
+
+/**
+ * Trust-policy (local) phase. Additive; runs after auth-availability.
+ * Deferred to a follow-up: filename-vs-registry diff and environment-
+ * name-vs-registry diff (Option C of #162).
+ */
+function checkTrustPolicyLocal(
+  cwd: string,
+  issues: string[],
+): TrustPolicyReport | undefined {
+  const workflows = findPublishWorkflows(cwd);
+  if (workflows.length === 0) return undefined;
+
+  const report: TrustPolicyReport = { workflows: [] };
+  for (const wf of workflows) {
+    const wfIssues: string[] = [];
+
+    const invocation = checkPublishInvocation(wf);
+    if (invocation !== null) {
+      wfIssues.push(
+        `trust-policy: ${wf.filename}: no clearly-identifiable publish step (commented out?)`,
+      );
+    }
+
+    const perms = checkPermissions(wf);
+    for (const p of perms) {
+      wfIssues.push(
+        `trust-policy: ${wf.filename}: job \`${p.job}\` is missing \`${p.permission}\` permission — add it to the job or to workflow-level \`permissions:\``,
+      );
+    }
+
+    const env = checkEnvironment(wf);
+    if (env !== null) {
+      wfIssues.push(
+        `trust-policy: ${wf.filename}: job \`${env.job}\` has no \`environment:\` key — many trust policies pin an environment; add one (e.g. \`environment: release\`) matching the registry registration`,
+      );
+    }
+
+    for (const line of wfIssues) issues.push(line);
+    report.workflows.push({
+      filename: wf.filename,
+      permissions_ok: perms.length === 0,
+      environment_ok: env === null,
+      invocation_ok: invocation === null,
+      issues: wfIssues,
+    });
+  }
+  return report;
+}
+
+/**
+ * Exported for CLI rendering: the explicit "what's NOT checked" line
+ * we surface below the trust-policy phase so a green doctor output
+ * doesn't imply the filename landmine is caught.
+ */
+export const TRUST_POLICY_SCOPE_NOTE =
+  'note: `doctor` does NOT diff workflow filename or environment name against each registry\'s trust policy. Renaming the workflow or environment will still break publish with HTTP 400 until the registry registration is updated.';
+
+/** Re-exported for callers that want to construct a `TrustPolicyReport` or inspect workflows directly. */
+export type { WorkflowFile };
 
 async function checkArtifacts(
   opts: DoctorOptions,

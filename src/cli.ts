@@ -15,7 +15,7 @@
  */
 
 import { login, logout, status, type DevicePrompt, type StatusResult } from './auth.js';
-import { doctor } from './doctor.js';
+import { doctor, TRUST_POLICY_SCOPE_NOTE } from './doctor.js';
 import { init } from './init.js';
 import { plan } from './plan.js';
 import { runPreflight } from './preflight-run.js';
@@ -244,6 +244,17 @@ export async function run(argv: readonly string[]): Promise<number> {
               const suffix = a.present ? '' : `  (expected: ${a.expected})`;
               process.stdout.write(`  ${badge} ${a.artifact_name} (${a.target})${suffix}\n`);
             }
+          }
+          if (report.trustPolicy) {
+            process.stdout.write('\ntrust policy (local):\n');
+            for (const wf of report.trustPolicy.workflows) {
+              const badge = wf.issues.length === 0 ? '✓' : '✗';
+              process.stdout.write(`  ${badge} publish workflow: ${wf.filename}\n`);
+              for (const line of wf.issues) {
+                process.stdout.write(`      ${line}\n`);
+              }
+            }
+            process.stdout.write(`  ${TRUST_POLICY_SCOPE_NOTE}\n`);
           }
           if (report.issues.length > 0) {
             process.stdout.write('\nIssues:\n');

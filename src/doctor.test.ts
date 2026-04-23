@@ -219,6 +219,152 @@ first_version = "0.1.0"
   });
 });
 
+/* ---------------- #162 Option D: trust-policy (local) ---------------- */
+
+describe('doctor: trust-policy (local)', () => {
+  const CFG = `
+[putitoutthere]
+version = 1
+[[package]]
+name  = "lib"
+kind  = "crates"
+path  = "packages/rust"
+paths = ["packages/rust/**"]
+`;
+
+  function writeWorkflow(body: string, name = 'release.yml'): void {
+    mkdirSync(join(repo, '.github', 'workflows'), { recursive: true });
+    writeFileSync(join(repo, '.github', 'workflows', name), body, 'utf8');
+  }
+
+  const GOOD = `name: Release
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - run: putitoutthere publish
+`;
+
+  it('all-green when the release workflow is well-formed', async () => {
+    writeCfg(CFG);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    writeWorkflow(GOOD);
+    const result = await doctor({ cwd: repo });
+    expect(result.ok).toBe(true);
+    expect(result.trustPolicy?.workflows).toHaveLength(1);
+    expect(result.trustPolicy?.workflows[0]?.permissions_ok).toBe(true);
+    expect(result.trustPolicy?.workflows[0]?.environment_ok).toBe(true);
+    expect(result.trustPolicy?.workflows[0]?.invocation_ok).toBe(true);
+  });
+
+  it('flags a workflow missing id-token: write', async () => {
+    writeCfg(CFG);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    writeWorkflow(`jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - run: putitoutthere publish
+`);
+    const result = await doctor({ cwd: repo });
+    expect(result.ok).toBe(false);
+    expect(result.issues.join('\n')).toMatch(/id-token: write/);
+  });
+
+  it('flags a workflow with no `environment:` key', async () => {
+    writeCfg(CFG);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    writeWorkflow(`jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - run: putitoutthere publish
+`);
+    const result = await doctor({ cwd: repo });
+    expect(result.ok).toBe(false);
+    expect(result.issues.join('\n')).toMatch(/no `environment:` key/);
+  });
+
+  it('ignores workflows that do not invoke piot', async () => {
+    writeCfg(CFG);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    writeWorkflow(`jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo nope
+`, 'ci.yml');
+    const result = await doctor({ cwd: repo });
+    expect(result.ok).toBe(true);
+    expect(result.trustPolicy).toBeUndefined();
+  });
+
+  it('trustPolicy is undefined when there is no .github/workflows at all', async () => {
+    writeCfg(CFG);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    const result = await doctor({ cwd: repo });
+    expect(result.trustPolicy).toBeUndefined();
+  });
+
+  it('flags a publish step that is commented out', async () => {
+    writeCfg(CFG);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    writeWorkflow(`jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: thekevinscott/put-it-out-there@v0
+        with:
+          command: publish
+      # - run: putitoutthere publish
+`);
+    // Sanity: the composite-action form above keeps this workflow
+    // "green" on invocation even if the commented line is ignored.
+    // To exercise the "no-publish-step" path we need a workflow that
+    // *only* has a commented-out publish.
+    writeWorkflow(`jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      # putitoutthere publish is currently disabled:
+      # - run: putitoutthere publish
+      - run: echo "hello"
+`, 'old-release.yml');
+    const result = await doctor({ cwd: repo });
+    // Should flag the old-release.yml no-publish-step issue, even
+    // though the current release.yml is fine.
+    expect(
+      result.issues.some((i) => /no clearly-identifiable publish step/.test(i)),
+    ).toBe(true);
+  });
+});
+
 describe('doctor --deep', () => {
   it('flags a PyPI scope mismatch as an issue', async () => {
     writeCfg(`
