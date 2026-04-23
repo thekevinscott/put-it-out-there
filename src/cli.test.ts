@@ -363,8 +363,10 @@ paths = ["**"]
       expect(out).toMatch(/trust policy \(local\)/);
       expect(out).toMatch(/release\.yml/);
       expect(out).toMatch(/id-token: write/);
-      // Scope disclaimer must be rendered so green output isn't misread.
-      expect(out).toMatch(/does NOT diff workflow filename/);
+      // #189: the scope note now points users at [package.trust_policy]
+      // and CRATES_IO_DOCTOR_TOKEN for the opt-in registry cross-check.
+      expect(out).toMatch(/\[package\.trust_policy\]/);
+      expect(out).toMatch(/CRATES_IO_DOCTOR_TOKEN/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
       delete process.env.CARGO_REGISTRY_TOKEN;

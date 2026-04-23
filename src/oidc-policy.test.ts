@@ -15,7 +15,10 @@ import {
   checkEnvironment,
   checkPermissions,
   checkPublishInvocation,
+  diffEnvironment,
+  diffWorkflowFilename,
   findPublishWorkflows,
+  inferFromGithubWorkflowRef,
   parseJobs,
   type WorkflowFile,
 } from './oidc-policy.js';
@@ -215,5 +218,89 @@ describe('checkPublishInvocation', () => {
     const issue = checkPublishInvocation(wf('release.yml', src));
     expect(issue).not.toBeNull();
     expect(issue!.kind).toBe('no-publish-step');
+  });
+});
+
+/* ------------------------- #189: declared diff ------------------------- */
+
+describe('diffWorkflowFilename (#189)', () => {
+  it('returns null when declared matches the local workflow basename', () => {
+    expect(diffWorkflowFilename('release.yml', 'release.yml')).toBeNull();
+  });
+
+  it('strips the .github/workflows/ prefix before comparing', () => {
+    expect(diffWorkflowFilename('release.yml', '.github/workflows/release.yml')).toBeNull();
+  });
+
+  it('returns a mismatch when the names differ', () => {
+    const m = diffWorkflowFilename('release.yml', 'patch-release.yml');
+    expect(m).not.toBeNull();
+    expect(m!.kind).toBe('workflow-filename-mismatch');
+    expect(m!.declared).toBe('release.yml');
+    expect(m!.actual).toBe('patch-release.yml');
+  });
+});
+
+describe('diffEnvironment (#189)', () => {
+  const workflow = wf(
+    'release.yml',
+    `jobs:\n  publish:\n    runs-on: ubuntu-latest\n    environment: release\n    steps:\n      - run: putitoutthere publish\n`,
+  );
+
+  it('returns null when declared matches job environment', () => {
+    expect(diffEnvironment('release', workflow)).toBeNull();
+  });
+
+  it('returns a mismatch when environments differ', () => {
+    const m = diffEnvironment('production', workflow);
+    expect(m).not.toBeNull();
+    expect(m!.declared).toBe('production');
+    expect(m!.actual).toBe('release');
+  });
+
+  it('returns a mismatch with actual=null when the job has no environment', () => {
+    const noEnv = wf(
+      'release.yml',
+      `jobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps:\n      - run: putitoutthere publish\n`,
+    );
+    const m = diffEnvironment('release', noEnv);
+    expect(m).not.toBeNull();
+    expect(m!.actual).toBeNull();
+  });
+
+  it('supports the nested `environment: { name: ... }` form', () => {
+    const nested = wf(
+      'release.yml',
+      `jobs:\n  publish:\n    runs-on: ubuntu-latest\n    environment:\n      name: release\n      url: https://example.com\n    steps:\n      - run: putitoutthere publish\n`,
+    );
+    expect(diffEnvironment('release', nested)).toBeNull();
+  });
+});
+
+describe('inferFromGithubWorkflowRef (#189)', () => {
+  it('parses the canonical shape', () => {
+    const result = inferFromGithubWorkflowRef({
+      GITHUB_WORKFLOW_REF: 'octo/hello/.github/workflows/release.yml@refs/heads/main',
+    });
+    expect(result).toEqual({ repository: 'octo/hello', workflow: 'release.yml' });
+  });
+
+  it('returns null when the env var is absent', () => {
+    expect(inferFromGithubWorkflowRef({})).toBeNull();
+  });
+
+  it('returns null when the value is empty', () => {
+    expect(inferFromGithubWorkflowRef({ GITHUB_WORKFLOW_REF: '' })).toBeNull();
+  });
+
+  it('returns null on a malformed value', () => {
+    expect(inferFromGithubWorkflowRef({ GITHUB_WORKFLOW_REF: 'garbage' })).toBeNull();
+  });
+
+  it('tolerates a missing @ref suffix', () => {
+    const result = inferFromGithubWorkflowRef({
+      GITHUB_WORKFLOW_REF: 'octo/hello/.github/workflows/release.yml',
+    });
+    expect(result?.workflow).toBe('release.yml');
   });
 });

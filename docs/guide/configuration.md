@@ -22,6 +22,7 @@ Shared fields across every `kind`:
 | `paths`         | string[] | yes      | Globs that cascade this package.                  |
 | `depends_on`    | string[] | no       | Package names this one depends on.                |
 | `first_version` | string   | no       | Default `0.1.0`.                                  |
+| `trust_policy`  | table    | no       | Declared OIDC trust-policy expectations — see [Authentication](./auth.md#declaring-trust-policy-expectations). |
 
 ### `kind = "crates"`
 

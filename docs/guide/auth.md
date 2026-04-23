@@ -73,12 +73,61 @@ trust policy (local):
   note: `doctor` does NOT diff workflow filename or environment name against each registry's trust policy. Renaming the workflow or environment will still break publish with HTTP 400 until the registry registration is updated.
 ```
 
-### What `doctor` does **not** yet check
+## Declaring trust-policy expectations
 
-- **Workflow filename matches each registry's registration.** If you rename `release.yml` → `patch-release.yml`, every trust policy pointing at `release.yml` will reject the token. `doctor` can't catch this today because it has no view of what each registry has registered.
-- **Environment name matches each registry's registration.** Same caveat — `doctor` checks that *an* environment is set, not that the name matches.
+Renaming a workflow from `release.yml` to `patch-release.yml`, or renaming an environment from `release` to `production`, breaks publish with an opaque HTTP 400 from the registry's token endpoint. There is no local reproduction — `cargo publish` works, `twine upload` works, but the OIDC exchange fails because the registry's trust policy still points at the old name.
 
-Both are tracked under a follow-up to issue [#162](https://github.com/thekevinscott/put-it-out-there/issues/162) (see the issue titled "doctor: diff workflow filename + environment name against registry trust policy"). Until that lands, treat a green `doctor` output as *necessary but not sufficient* — rename safety still requires a manual cross-check with each registry's trusted-publisher settings page.
+To catch this before release, declare the expected values in `putitoutthere.toml`:
+
+```toml
+[[package]]
+name = "dirsql"
+kind = "crates"
+path = "crates/dirsql"
+paths = ["crates/dirsql/**"]
+
+[package.trust_policy]
+workflow    = "release.yml"              # required; bare filename, not a path
+environment = "release"                  # optional
+repository  = "thekevinscott/dirsql"     # optional; owner/repo
+```
+
+`doctor` then runs two additional phases after the local-structure phase:
+
+### `trust policy (declared)`
+
+Declaration-first. Runs whenever any package has a `trust_policy` block. Diffs:
+
+- **Declared workflow vs. the local workflow file** — catches `release.yml` → `patch-release.yml` renames before they reach the registry.
+- **Declared environment vs. the workflow's job-level `environment:`** — catches drift between the config and the actual job definition.
+- **Declared workflow vs. `GITHUB_WORKFLOW_REF`** (only when running inside Actions) — catches the case where `doctor` runs in a different workflow than declared.
+
+If no package declares a `trust_policy`, the phase prints a neutral "not declared" line and does not fail. The block is opt-in; declaration is explicit.
+
+### `trust policy (crates.io registry)`
+
+Opt-in registry cross-check. Runs only when `CRATES_IO_DOCTOR_TOKEN` is set in the environment. For each `kind = "crates"` package with a declared `trust_policy`, calls crates.io's trusted-publishing read API and diffs each registered config against the declaration. On mismatch, the phase fails with the specific field that disagrees (workflow filename, environment, or repository).
+
+Transient failures (timeout, network error, 5xx) are neutral-skipped with an explicit reason — `doctor` does not turn red because crates.io is having a bad minute. A 401 response fails the phase (the token is bad).
+
+```yaml
+- name: Validate trust-policy setup (including registry cross-check)
+  env:
+    CRATES_IO_DOCTOR_TOKEN: ${{ secrets.CRATES_IO_DOCTOR_TOKEN }}
+  run: npx putitoutthere doctor
+```
+
+`CRATES_IO_DOCTOR_TOKEN` is a crates.io API token with read access. Create one under **Account settings → API tokens** with the default scope; it does not need publish permissions. Store it as a repository secret, not as a long-lived export on developer machines.
+
+### Why only crates.io?
+
+PyPI has no current-policy read endpoint (its Integrity API returns provenance for past publishes, not current trust-publisher configs). npm's `GET /-/package/{name}/trust` exists but requires 2FA/OTP on every call and rejects granular-access tokens with bypass-2FA enabled — unusable from CI.
+
+For PyPI and npm, the declared phase is the full gate: the `[package.trust_policy]` block captures your intent, and the local-workflow diff catches the common rename failure. There is no registry cross-check because neither registry exposes one.
+
+### What `doctor` still does **not** check
+
+The declaration is what you tell `doctor` is registered. For PyPI and npm, `doctor` has no way to verify that what you declared actually matches what the registry has on file. Keep the declared block in sync with each registry's trusted-publisher settings page manually, or cross-check via the registry's web UI on any rename.
 
 ## Fallback: long-lived tokens
 
