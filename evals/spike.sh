@@ -98,7 +98,7 @@ cleanup() {
   fi
   # agent-browser daemon may persist across runs — close it for hygiene.
   agent-browser close --all >/dev/null 2>&1 || true
-  rm -rf "$WORK" "${WRAP:-}"
+  rm -rf "$WORK"
   exit $rc
 }
 trap cleanup EXIT INT TERM
@@ -110,34 +110,31 @@ if [[ "$SHAPE" == "isolated" && "$DOCS_SERVER" == "yes" ]]; then
   [[ -d "$REPO_ROOT/docs/node_modules" ]] || { echo "ERROR: docs deps missing (pnpm install --dir docs)" >&2; exit 4; }
   command -v unshare >/dev/null || { echo "ERROR: unshare not on PATH" >&2; exit 4; }
 
-  # Build the docs once, then serve the built dist/ via a plain static
-  # HTTP server. Earlier attempts used `vitepress dev` (with HMR and
-  # file watching) and it crashed mid-probe under memory pressure from
-  # chromium's concurrent navigations (docs log ended with
-  # `ELIFECYCLE`). A pre-built static tree is cheaper and stable.
+  # Build the docs once, then serve the built output via
+  # `vitepress preview` — a lightweight express-like server that
+  # understands cleanUrls (so `/guide/handoffs/polyglot-rust`
+  # resolves to `polyglot-rust.html`). `python3 -m http.server` was
+  # the earlier attempt; it doesn't implement cleanUrls and silently
+  # 404'd the probe on almost every sidebar link, masquerading as
+  # "not_mentioned" primitives in the grade. `vitepress preview` is
+  # serve-only (no HMR, no file watcher) so it's stable under
+  # concurrent chromium load, unlike `vitepress dev`.
   DOCS_LOG="$SNAP_DIR/${VARIANT}-${TS}-docs.log"
-  echo "==> docs: vitepress build + static server (log: $DOCS_LOG)"
+  echo "==> docs: vitepress build (log: $DOCS_LOG)"
   if ! ( cd "$REPO_ROOT/docs" && pnpm build ) > "$DOCS_LOG" 2>&1; then
     echo "ERROR: vitepress build failed"; tail -20 "$DOCS_LOG" >&2; exit 3
   fi
 
-  # Symlink dist/ under a `put-it-out-there/` subdir so requests to
-  # the base path (which matches the deployed GH Pages layout) resolve.
-  # Wrap dir lives outside $WORK so it doesn't collide with setup.sh's
-  # `git clone $WORK` (which refuses a non-empty target).
-  WRAP="$(mktemp -d)"
-  ln -s "$REPO_ROOT/docs/.vitepress/dist" "$WRAP/put-it-out-there"
-
   DOCS_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
   DOCS_URL="http://localhost:${DOCS_PORT}/put-it-out-there/"
-  echo "==> docs: static server on port $DOCS_PORT → $DOCS_URL"
-  ( cd "$WRAP" && exec python3 -m http.server --bind 0.0.0.0 "$DOCS_PORT" ) >> "$DOCS_LOG" 2>&1 &
+  echo "==> docs: vitepress preview on port $DOCS_PORT → $DOCS_URL"
+  ( cd "$REPO_ROOT/docs" && exec pnpm preview --port "$DOCS_PORT" --host 127.0.0.1 ) >> "$DOCS_LOG" 2>&1 &
   DOCS_PID=$!
-  for _ in $(seq 1 20); do
+  for _ in $(seq 1 30); do
     curl -sf "$DOCS_URL" -o /dev/null 2>/dev/null && { echo "    ready at $DOCS_URL"; break; }
     sleep 0.3
   done
-  curl -sf "$DOCS_URL" -o /dev/null 2>/dev/null || { echo "ERROR: static server not ready"; tail -20 "$DOCS_LOG" >&2; exit 3; }
+  curl -sf "$DOCS_URL" -o /dev/null 2>/dev/null || { echo "ERROR: preview not ready"; tail -20 "$DOCS_LOG" >&2; exit 3; }
 fi
 
 PROMPT_TEXT="$(cat "$FIXTURE_DIR/prompt.md")"
