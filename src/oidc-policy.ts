@@ -68,6 +68,23 @@ export interface InvocationIssue {
   workflow: string;
 }
 
+/** Issue: declared `trust_policy.workflow` does not match the workflow we found. */
+export interface WorkflowFilenameMismatch {
+  kind: 'workflow-filename-mismatch';
+  declared: string;
+  actual: string;
+  /** Where `actual` came from — used to refine the error message. */
+  source: 'local-workflow' | 'github-workflow-ref';
+}
+
+/** Issue: declared `trust_policy.environment` does not match the workflow. */
+export interface EnvironmentMismatch {
+  kind: 'environment-mismatch';
+  workflow: string;
+  declared: string;
+  actual: string | null;
+}
+
 /**
  * Scan `.github/workflows/*.yml` and `*.yaml` for workflows that invoke
  * `putitoutthere publish` or the composite action in a publish mode.
@@ -266,6 +283,108 @@ export function checkPublishInvocation(workflow: WorkflowFile): InvocationIssue 
   if (usesPiot && commandPublish) return null;
 
   return { kind: 'no-publish-step', workflow: workflow.filename };
+}
+
+/* ---------------------- #189: declared diff ---------------------- */
+
+/**
+ * Extract the basename (no directory) from a bare or path-shaped string.
+ * Normalizes both slash styles so a caller feeding in a
+ * `.github/workflows/release.yml` still gets `release.yml` back.
+ */
+function basename(p: string): string {
+  const normalized = p.replace(/\\/g, '/');
+  const idx = normalized.lastIndexOf('/');
+  return idx === -1 ? normalized : normalized.slice(idx + 1);
+}
+
+/**
+ * Compare `trust_policy.workflow` against the filename of the workflow
+ * that `findPublishWorkflows` identified. The declaration is always a
+ * bare filename (Zod enforces that at parse time); the comparison is
+ * case-sensitive. Returns `null` on match.
+ */
+export function diffWorkflowFilename(
+  declared: string,
+  workflowFilename: string,
+): WorkflowFilenameMismatch | null {
+  const actual = basename(workflowFilename);
+  if (declared === actual) return null;
+  return {
+    kind: 'workflow-filename-mismatch',
+    declared,
+    actual,
+    source: 'local-workflow',
+  };
+}
+
+/**
+ * Compare `trust_policy.environment` against the workflow's job-level
+ * `environment:` value. Absence of a declared environment is not an
+ * error — the caller decides whether to invoke this. Returns `null` on
+ * match.
+ */
+export function diffEnvironment(
+  declared: string,
+  workflow: WorkflowFile,
+): EnvironmentMismatch | null {
+  const actual = extractJobEnvironment(workflow);
+  if (actual === declared) return null;
+  return {
+    kind: 'environment-mismatch',
+    workflow: workflow.filename,
+    declared,
+    actual,
+  };
+}
+
+/**
+ * Read `process.env.GITHUB_WORKFLOW_REF` (populated by GitHub Actions)
+ * and parse out the workflow filename. Shape:
+ *
+ *   `owner/repo/.github/workflows/release.yml@refs/heads/main`
+ *
+ * Returns `null` when the env var is absent (we're not running inside
+ * Actions) OR when the value doesn't parse — we'd rather neutral-skip
+ * the check than false-positive on an unexpected shape.
+ */
+export function inferFromGithubWorkflowRef(
+  env: NodeJS.ProcessEnv = process.env,
+): { workflow: string; repository: string } | null {
+  const ref = env.GITHUB_WORKFLOW_REF;
+  if (ref === undefined || ref.length === 0) return null;
+  // Strip the `@ref` suffix, then match
+  // `<owner>/<repo>/.github/workflows/<file>`.
+  const atIdx = ref.indexOf('@');
+  const pathPart = atIdx === -1 ? ref : ref.slice(0, atIdx);
+  const m = /^([^/\s]+\/[^/\s]+)\/\.github\/workflows\/(.+)$/.exec(pathPart);
+  if (!m) return null;
+  return { repository: m[1]!, workflow: m[2]! };
+}
+
+/**
+ * Extract the job-level `environment:` value from a workflow's publish
+ * job. Supports the inline form (`environment: release`) and the nested
+ * form (`environment:\n  name: release`). Returns `null` when no
+ * environment is declared (or no publish job is found).
+ */
+function extractJobEnvironment(workflow: WorkflowFile): string | null {
+  const publishJob = findPublishJob(workflow);
+  /* v8 ignore next -- caller only invokes this for workflows that have a publish job */
+  if (publishJob === null) return null;
+  const raw = extractBlockFromJob(publishJob.source, 'environment');
+  if (raw === null) return null;
+  const trimmed = raw.trim();
+  // Inline form: `environment: release`. Nested form: `environment:\n  name: release`.
+  // The inline regex matches when the value is a single line; for nested
+  // blocks, look for the `name:` key inside the body. When neither
+  // matches the block is structurally malformed — null propagates.
+  if (!trimmed.includes('\n')) {
+    const inline = /^['"]?([^'"\n]+?)['"]?$/.exec(trimmed);
+    return inline ? inline[1]!.trim() : null;
+  }
+  const nested = /^\s*name\s*:\s*['"]?([^'"\n]+?)['"]?\s*$/m.exec(trimmed);
+  return nested ? nested[1]!.trim() : null;
 }
 
 /* ---------------------------- helpers ---------------------------- */

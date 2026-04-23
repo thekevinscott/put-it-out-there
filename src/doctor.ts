@@ -23,9 +23,19 @@ import {
   checkEnvironment,
   checkPermissions,
   checkPublishInvocation,
+  diffEnvironment,
+  diffWorkflowFilename,
   findPublishWorkflows,
+  inferFromGithubWorkflowRef,
+  type EnvironmentMismatch,
   type WorkflowFile,
+  type WorkflowFilenameMismatch,
 } from './oidc-policy.js';
+import {
+  diffCratesTrust,
+  fetchCratesTrustPolicy,
+  type CratesTrustMismatch,
+} from './registries/crates-trust.js';
 import { plan } from './plan.js';
 import { checkAuth, type AuthResult } from './preflight.js';
 import { deepCheck, type DeepCheckRow, type InspectFn } from './token-scope.js';
@@ -43,6 +53,12 @@ export interface DoctorOptions {
   deep?: boolean;
   /** Override for tests; defaults to the real `inspect`. */
   inspectFn?: InspectFn;
+  /**
+   * Override for tests of the crates.io trust-policy cross-check.
+   * Defaults to the real `fetchCratesTrustPolicy`. Accepting `null`
+   * here means "use the default".
+   */
+  cratesIoFetch?: typeof fetchCratesTrustPolicy;
 }
 
 export interface DoctorReport {
@@ -69,6 +85,17 @@ export interface DoctorReport {
    * with no `.github/workflows/` yet — no signal, no noise).
    */
   trustPolicy?: TrustPolicyReport;
+  /**
+   * Trust-policy (declared) check results. See #189. `undefined` when
+   * no package has a `[package.trust_policy]` block.
+   */
+  trustPolicyDeclared?: TrustPolicyDeclaredReport;
+  /**
+   * Trust-policy (crates.io) cross-check. `undefined` when the phase
+   * didn't run (e.g. no `CRATES_IO_DOCTOR_TOKEN`, or no crates with
+   * `trust_policy` declared).
+   */
+  trustPolicyCratesIo?: TrustPolicyCratesIoReport;
 }
 
 export interface TrustPolicyReport {
@@ -78,6 +105,29 @@ export interface TrustPolicyReport {
     environment_ok: boolean;
     invocation_ok: boolean;
     issues: string[];
+  }>;
+}
+
+export interface TrustPolicyDeclaredReport {
+  /** One entry per package with a `[package.trust_policy]` block. */
+  packages: Array<{
+    name: string;
+    workflow_ok: boolean;
+    environment_ok: boolean;
+    ref_ok: boolean;
+    issues: string[];
+  }>;
+}
+
+export interface TrustPolicyCratesIoReport {
+  /** `'skipped'` when the token was missing; other values are per-crate statuses. */
+  status: 'ran' | 'skipped';
+  reason?: string;
+  crates: Array<{
+    name: string;
+    status: 'ok' | 'mismatch' | 'skip-transient' | 'auth-failed';
+    reason?: string;
+    mismatches?: CratesTrustMismatch[];
   }>;
 }
 
@@ -150,7 +200,14 @@ export async function doctor(opts: DoctorOptions): Promise<DoctorReport> {
     ? await checkArtifacts(opts, cfgPath, issues)
     : undefined;
 
-  const trustPolicy = checkTrustPolicyLocal(opts.cwd, issues);
+  const workflows = findPublishWorkflows(opts.cwd);
+  const trustPolicy = checkTrustPolicyLocal(workflows, issues);
+  const trustPolicyDeclared = config
+    ? checkTrustPolicyDeclared(config.packages, workflows, issues)
+    : undefined;
+  const trustPolicyCratesIo = config
+    ? await checkTrustPolicyCratesIo(config.packages, issues, opts.cratesIoFetch)
+    : undefined;
 
   return {
     ok: issues.length === 0,
@@ -158,6 +215,8 @@ export async function doctor(opts: DoctorOptions): Promise<DoctorReport> {
     packages,
     ...(artifacts !== undefined ? { artifacts } : {}),
     ...(trustPolicy !== undefined ? { trustPolicy } : {}),
+    ...(trustPolicyDeclared !== undefined ? { trustPolicyDeclared } : {}),
+    ...(trustPolicyCratesIo !== undefined ? { trustPolicyCratesIo } : {}),
   };
 }
 
@@ -167,10 +226,9 @@ export async function doctor(opts: DoctorOptions): Promise<DoctorReport> {
  * name-vs-registry diff (Option C of #162).
  */
 function checkTrustPolicyLocal(
-  cwd: string,
+  workflows: readonly WorkflowFile[],
   issues: string[],
 ): TrustPolicyReport | undefined {
-  const workflows = findPublishWorkflows(cwd);
   if (workflows.length === 0) return undefined;
 
   const report: TrustPolicyReport = { workflows: [] };
@@ -216,7 +274,138 @@ function checkTrustPolicyLocal(
  * doesn't imply the filename landmine is caught.
  */
 export const TRUST_POLICY_SCOPE_NOTE =
-  'note: `doctor` does NOT diff workflow filename or environment name against each registry\'s trust policy. Renaming the workflow or environment will still break publish with HTTP 400 until the registry registration is updated.';
+  'note: declare `[package.trust_policy]` to have `doctor` diff workflow + environment against the config. Registry cross-check is crates.io-only (set `CRATES_IO_DOCTOR_TOKEN`); PyPI and npm are declaration-only.';
+
+/**
+ * Declared-diff phase (#189). For each package with a `[package.trust_policy]`
+ * block, diffs the declaration against:
+ *  - the local workflow file that `findPublishWorkflows` identified
+ *  - `GITHUB_WORKFLOW_REF` when running inside Actions
+ * Returns `undefined` when no package has a declaration.
+ */
+function checkTrustPolicyDeclared(
+  packages: readonly Package[],
+  workflows: readonly WorkflowFile[],
+  issues: string[],
+): TrustPolicyDeclaredReport | undefined {
+  const declared = packages.filter((p) => p.trust_policy !== undefined);
+  if (declared.length === 0) return undefined;
+  const report: TrustPolicyDeclaredReport = { packages: [] };
+  const localWorkflow = workflows[0]?.filename;
+  const inferred = inferFromGithubWorkflowRef();
+  for (const pkg of declared) {
+    const policy = pkg.trust_policy;
+    /* v8 ignore next -- filter guarantees trust_policy is set */
+    if (policy === undefined) continue;
+    const pkgIssues: string[] = [];
+    let workflowOk = true;
+    let environmentOk = true;
+    let refOk = true;
+    if (localWorkflow !== undefined) {
+      const mismatch = diffWorkflowFilename(policy.workflow, localWorkflow);
+      if (mismatch !== null) {
+        workflowOk = false;
+        pkgIssues.push(renderWorkflowMismatch(pkg.name, mismatch));
+      }
+    }
+    if (policy.environment !== undefined) {
+      for (const wf of workflows) {
+        const envMismatch = diffEnvironment(policy.environment, wf);
+        if (envMismatch !== null) {
+          environmentOk = false;
+          pkgIssues.push(renderEnvironmentMismatch(pkg.name, envMismatch));
+          break;
+        }
+      }
+    }
+    if (inferred !== null && inferred.workflow !== policy.workflow) {
+      refOk = false;
+      pkgIssues.push(
+        `trust-policy: ${pkg.name}: GITHUB_WORKFLOW_REF says the running workflow is ${inferred.workflow}, but [package.trust_policy].workflow is ${policy.workflow}`,
+      );
+    }
+    for (const line of pkgIssues) issues.push(line);
+    report.packages.push({
+      name: pkg.name,
+      workflow_ok: workflowOk,
+      environment_ok: environmentOk,
+      ref_ok: refOk,
+      issues: pkgIssues,
+    });
+  }
+  return report;
+}
+
+function renderWorkflowMismatch(pkgName: string, m: WorkflowFilenameMismatch): string {
+  return `trust-policy: ${pkgName}: declared workflow ${m.declared} does not match local workflow ${m.actual} — update [package.trust_policy].workflow or rename the workflow file back`;
+}
+
+function renderEnvironmentMismatch(pkgName: string, m: EnvironmentMismatch): string {
+  const actual = m.actual ?? '(none)';
+  return `trust-policy: ${pkgName}: declared environment ${m.declared} does not match workflow ${m.workflow}'s environment ${actual}`;
+}
+
+/**
+ * Opt-in crates.io cross-check (#189). Silent-skip when
+ * `CRATES_IO_DOCTOR_TOKEN` is unset. For each `kind = "crates"` package
+ * with a declared `trust_policy`, fetches the registered configs and
+ * diffs against the declaration. Transient failures are neutral-skipped
+ * so a bad crates.io minute doesn't turn doctor red; 401 fails.
+ */
+async function checkTrustPolicyCratesIo(
+  packages: readonly Package[],
+  issues: string[],
+  fetchFn: typeof fetchCratesTrustPolicy = fetchCratesTrustPolicy,
+): Promise<TrustPolicyCratesIoReport | undefined> {
+  const crates = packages.filter(
+    (p): p is Package & { kind: 'crates'; trust_policy: NonNullable<Package['trust_policy']> } =>
+      p.kind === 'crates' && p.trust_policy !== undefined,
+  );
+  if (crates.length === 0) return undefined;
+  const token = process.env.CRATES_IO_DOCTOR_TOKEN;
+  if (token === undefined || token.length === 0) {
+    return {
+      status: 'skipped',
+      reason: 'set CRATES_IO_DOCTOR_TOKEN to enable crates.io trust-policy cross-check',
+      crates: [],
+    };
+  }
+  const report: TrustPolicyCratesIoReport = { status: 'ran', crates: [] };
+  for (const pkg of crates) {
+    const crateName = pkg.name;
+    const result = await fetchFn(crateName, token);
+    if (result.kind === 'skip-transient') {
+      report.crates.push({ name: crateName, status: 'skip-transient', reason: result.reason });
+      continue;
+    }
+    if (result.kind === 'auth-failed') {
+      report.crates.push({ name: crateName, status: 'auth-failed', reason: result.reason });
+      issues.push(`trust-policy: ${crateName}: ${result.reason}`);
+      continue;
+    }
+    const policy = pkg.trust_policy;
+    const mismatches = diffCratesTrust(
+      crateName,
+      {
+        workflow: policy.workflow,
+        ...(policy.environment !== undefined ? { environment: policy.environment } : {}),
+        ...(policy.repository !== undefined ? { repository: policy.repository } : {}),
+      },
+      result.configs,
+    );
+    if (mismatches.length === 0) {
+      report.crates.push({ name: crateName, status: 'ok' });
+    } else {
+      report.crates.push({ name: crateName, status: 'mismatch', mismatches });
+      for (const m of mismatches) {
+        issues.push(
+          `trust-policy: ${crateName}: crates.io has ${m.field} = ${m.registered ?? '(none)'}, config declares ${m.declared}`,
+        );
+      }
+    }
+  }
+  return report;
+}
 
 /** Re-exported for callers that want to construct a `TrustPolicyReport` or inspect workflows directly. */
 export type { WorkflowFile };

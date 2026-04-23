@@ -449,3 +449,236 @@ paths = ["packages/py/**"]
     expect(entry?.scope).toBeUndefined();
   });
 });
+
+/* ---------------- #189: trust-policy (declared + crates.io) ---------------- */
+
+describe('doctor: trust-policy (declared)', () => {
+  const GOOD_WORKFLOW = `name: Release
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - run: putitoutthere publish
+`;
+
+  function writeWorkflow(body: string, name = 'release.yml'): void {
+    mkdirSync(join(repo, '.github', 'workflows'), { recursive: true });
+    writeFileSync(join(repo, '.github', 'workflows', name), body, 'utf8');
+  }
+
+  it('is undefined when no package declares a trust_policy', async () => {
+    writeCfg(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "lib"
+kind  = "crates"
+path  = "packages/rust"
+paths = ["packages/rust/**"]
+`);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    writeWorkflow(GOOD_WORKFLOW);
+    const result = await doctor({ cwd: repo });
+    expect(result.trustPolicyDeclared).toBeUndefined();
+    delete process.env.CARGO_REGISTRY_TOKEN;
+  });
+
+  it('all-green when declared matches the local workflow', async () => {
+    writeCfg(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "lib"
+kind  = "crates"
+path  = "packages/rust"
+paths = ["packages/rust/**"]
+[package.trust_policy]
+workflow    = "release.yml"
+environment = "release"
+`);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    writeWorkflow(GOOD_WORKFLOW);
+    const result = await doctor({ cwd: repo });
+    expect(result.ok).toBe(true);
+    expect(result.trustPolicyDeclared?.packages[0]?.workflow_ok).toBe(true);
+    expect(result.trustPolicyDeclared?.packages[0]?.environment_ok).toBe(true);
+    delete process.env.CARGO_REGISTRY_TOKEN;
+  });
+
+  it('fails when declared workflow does not match the local filename', async () => {
+    writeCfg(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "lib"
+kind  = "crates"
+path  = "packages/rust"
+paths = ["packages/rust/**"]
+[package.trust_policy]
+workflow = "release.yml"
+`);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    writeWorkflow(GOOD_WORKFLOW, 'patch-release.yml');
+    const result = await doctor({ cwd: repo });
+    expect(result.ok).toBe(false);
+    expect(result.trustPolicyDeclared?.packages[0]?.workflow_ok).toBe(false);
+    expect(result.issues.join('\n')).toMatch(/declared workflow release\.yml/);
+    delete process.env.CARGO_REGISTRY_TOKEN;
+  });
+
+  it('fails when declared environment does not match the workflow', async () => {
+    writeCfg(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "lib"
+kind  = "crates"
+path  = "packages/rust"
+paths = ["packages/rust/**"]
+[package.trust_policy]
+workflow    = "release.yml"
+environment = "production"
+`);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    writeWorkflow(GOOD_WORKFLOW);
+    const result = await doctor({ cwd: repo });
+    expect(result.ok).toBe(false);
+    expect(result.trustPolicyDeclared?.packages[0]?.environment_ok).toBe(false);
+    delete process.env.CARGO_REGISTRY_TOKEN;
+  });
+});
+
+describe('doctor: trust-policy (crates.io registry)', () => {
+  const CFG_DECLARED = `
+[putitoutthere]
+version = 1
+[[package]]
+name  = "lib"
+kind  = "crates"
+path  = "packages/rust"
+paths = ["packages/rust/**"]
+[package.trust_policy]
+workflow    = "release.yml"
+environment = "release"
+repository  = "octo/hello"
+`;
+
+  function setupWorkflow(): void {
+    mkdirSync(join(repo, '.github', 'workflows'), { recursive: true });
+    writeFileSync(
+      join(repo, '.github', 'workflows', 'release.yml'),
+      `jobs:\n  publish:\n    runs-on: ubuntu-latest\n    environment: release\n    permissions:\n      contents: write\n      id-token: write\n    steps:\n      - run: putitoutthere publish\n`,
+      'utf8',
+    );
+  }
+
+  it('is skipped when CRATES_IO_DOCTOR_TOKEN is unset', async () => {
+    writeCfg(CFG_DECLARED);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    setupWorkflow();
+    delete process.env.CRATES_IO_DOCTOR_TOKEN;
+    const result = await doctor({ cwd: repo });
+    expect(result.trustPolicyCratesIo?.status).toBe('skipped');
+    delete process.env.CARGO_REGISTRY_TOKEN;
+  });
+
+  it('runs and passes when the mock registry agrees with the declaration', async () => {
+    writeCfg(CFG_DECLARED);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    process.env.CRATES_IO_DOCTOR_TOKEN = 'crates-tok';
+    setupWorkflow();
+    const result = await doctor({
+      cwd: repo,
+      cratesIoFetch: () =>
+        Promise.resolve({
+          kind: 'ok',
+          configs: [
+            {
+              id: 1,
+              repository_owner: 'octo',
+              repository_name: 'hello',
+              workflow_filename: 'release.yml',
+              environment: 'release',
+            },
+          ],
+        }),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.trustPolicyCratesIo?.status).toBe('ran');
+    expect(result.trustPolicyCratesIo?.crates[0]?.status).toBe('ok');
+    delete process.env.CARGO_REGISTRY_TOKEN;
+    delete process.env.CRATES_IO_DOCTOR_TOKEN;
+  });
+
+  it('fails when the mock registry disagrees with the declaration', async () => {
+    writeCfg(CFG_DECLARED);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    process.env.CRATES_IO_DOCTOR_TOKEN = 'crates-tok';
+    setupWorkflow();
+    const result = await doctor({
+      cwd: repo,
+      cratesIoFetch: () =>
+        Promise.resolve({
+          kind: 'ok',
+          configs: [
+            {
+              id: 1,
+              repository_owner: 'octo',
+              repository_name: 'hello',
+              workflow_filename: 'patch-release.yml',
+              environment: 'release',
+            },
+          ],
+        }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.trustPolicyCratesIo?.crates[0]?.status).toBe('mismatch');
+    expect(result.issues.join('\n')).toMatch(/workflow_filename = patch-release\.yml/);
+    delete process.env.CARGO_REGISTRY_TOKEN;
+    delete process.env.CRATES_IO_DOCTOR_TOKEN;
+  });
+
+  it('neutral-skips on transient fetch failure', async () => {
+    writeCfg(CFG_DECLARED);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    process.env.CRATES_IO_DOCTOR_TOKEN = 'crates-tok';
+    setupWorkflow();
+    const result = await doctor({
+      cwd: repo,
+      cratesIoFetch: () =>
+        Promise.resolve({ kind: 'skip-transient', reason: 'network down' }),
+    });
+    // Transient skip does NOT fail the overall report.
+    expect(result.trustPolicyCratesIo?.crates[0]?.status).toBe('skip-transient');
+    delete process.env.CARGO_REGISTRY_TOKEN;
+    delete process.env.CRATES_IO_DOCTOR_TOKEN;
+  });
+
+  it('fails on auth-failed (token rejected)', async () => {
+    writeCfg(CFG_DECLARED);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    process.env.CRATES_IO_DOCTOR_TOKEN = 'bad';
+    setupWorkflow();
+    const result = await doctor({
+      cwd: repo,
+      cratesIoFetch: () =>
+        Promise.resolve({ kind: 'auth-failed', reason: 'crates.io rejected CRATES_IO_DOCTOR_TOKEN (401)' }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.trustPolicyCratesIo?.crates[0]?.status).toBe('auth-failed');
+    delete process.env.CARGO_REGISTRY_TOKEN;
+    delete process.env.CRATES_IO_DOCTOR_TOKEN;
+  });
+});

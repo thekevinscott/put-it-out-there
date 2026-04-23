@@ -682,3 +682,53 @@ describe('loadConfig: filesystem', () => {
     expect(() => loadConfig(path)).toThrow(/cannot read/);
   });
 });
+
+/* ----------------------- #189: trust_policy block ----------------------- */
+
+describe('parseConfig: trust_policy', () => {
+  const WITH_TRUST = `
+[putitoutthere]
+version = 1
+[[package]]
+name  = "lib"
+kind  = "crates"
+path  = "packages/rust"
+paths = ["packages/rust/**"]
+[package.trust_policy]
+workflow    = "release.yml"
+environment = "release"
+repository  = "octo/hello"
+`;
+
+  it('accepts a valid [package.trust_policy] block', () => {
+    const cfg = parseConfig(WITH_TRUST);
+    expect(cfg.packages[0]!.trust_policy).toEqual({
+      workflow: 'release.yml',
+      environment: 'release',
+      repository: 'octo/hello',
+    });
+  });
+
+  it('accepts workflow alone (environment + repository optional)', () => {
+    const cfg = parseConfig(
+      WITH_TRUST.replace(/environment[^\n]*\n/, '').replace(/repository[^\n]*\n/, ''),
+    );
+    expect(cfg.packages[0]!.trust_policy?.workflow).toBe('release.yml');
+    expect(cfg.packages[0]!.trust_policy?.environment).toBeUndefined();
+  });
+
+  it('rejects a path-shaped workflow value', () => {
+    const bad = WITH_TRUST.replace('"release.yml"', '".github/workflows/release.yml"');
+    expect(() => parseConfig(bad)).toThrow(/bare filename/);
+  });
+
+  it('rejects a repository without a slash', () => {
+    const bad = WITH_TRUST.replace('"octo/hello"', '"just-a-name"');
+    expect(() => parseConfig(bad)).toThrow(/owner\/repo/);
+  });
+
+  it('rejects unknown keys via .strict()', () => {
+    const bad = WITH_TRUST + 'work_flow = "typo.yml"\n';
+    expect(() => parseConfig(bad)).toThrow();
+  });
+});

@@ -256,6 +256,37 @@ export async function run(argv: readonly string[]): Promise<number> {
             }
             process.stdout.write(`  ${TRUST_POLICY_SCOPE_NOTE}\n`);
           }
+          if (report.trustPolicyDeclared) {
+            process.stdout.write('\ntrust policy (declared):\n');
+            for (const pkg of report.trustPolicyDeclared.packages) {
+              const badge = pkg.issues.length === 0 ? '✓' : '✗';
+              process.stdout.write(`  ${badge} ${pkg.name}\n`);
+              for (const line of pkg.issues) {
+                process.stdout.write(`      ${line}\n`);
+              }
+            }
+          }
+          if (report.trustPolicyCratesIo) {
+            process.stdout.write('\ntrust policy (crates.io registry):\n');
+            if (report.trustPolicyCratesIo.status === 'skipped') {
+              process.stdout.write(`  - ${report.trustPolicyCratesIo.reason ?? 'skipped'}\n`);
+            } else {
+              for (const c of report.trustPolicyCratesIo.crates) {
+                const badge =
+                  c.status === 'ok' ? '✓' : c.status === 'skip-transient' ? '-' : '✗';
+                process.stdout.write(`  ${badge} ${c.name}`);
+                if (c.reason !== undefined) {
+                  process.stdout.write(` — ${c.reason}`);
+                }
+                process.stdout.write('\n');
+                for (const m of c.mismatches ?? []) {
+                  process.stdout.write(
+                    `      ${m.field}: declared ${m.declared}, registered ${m.registered ?? '(none)'}\n`,
+                  );
+                }
+              }
+            }
+          }
           if (report.issues.length > 0) {
             process.stdout.write('\nIssues:\n');
             for (const i of report.issues) {
