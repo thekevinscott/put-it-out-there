@@ -110,31 +110,30 @@ if [[ "$SHAPE" == "isolated" && "$DOCS_SERVER" == "yes" ]]; then
   [[ -d "$REPO_ROOT/docs/node_modules" ]] || { echo "ERROR: docs deps missing (pnpm install --dir docs)" >&2; exit 4; }
   command -v unshare >/dev/null || { echo "ERROR: unshare not on PATH" >&2; exit 4; }
 
-  # Build the docs once, then serve the built output via
-  # `vitepress preview` — a lightweight express-like server that
-  # understands cleanUrls (so `/guide/handoffs/polyglot-rust`
-  # resolves to `polyglot-rust.html`). `python3 -m http.server` was
-  # the earlier attempt; it doesn't implement cleanUrls and silently
-  # 404'd the probe on almost every sidebar link, masquerading as
-  # "not_mentioned" primitives in the grade. `vitepress preview` is
-  # serve-only (no HMR, no file watcher) so it's stable under
-  # concurrent chromium load, unlike `vitepress dev`.
+  # Build the docs once, then serve via evals/tools/docs-server.mjs —
+  # a tiny Node server with cleanUrls, base-path, and access logs.
+  # vitepress dev was unstable under concurrent-chromium memory
+  # pressure; plain python3 -m http.server didn't implement cleanUrls
+  # and silently 404'd the probe on every sidebar link; vitepress
+  # preview works but emits no access log. The custom server gives
+  # cleanUrls + a request-level log we can diff when investigating
+  # why a primitive went "not_mentioned".
   DOCS_LOG="$SNAP_DIR/${VARIANT}-${TS}-docs.log"
   echo "==> docs: vitepress build (log: $DOCS_LOG)"
-  if ! ( cd "$REPO_ROOT/docs" && pnpm build ) > "$DOCS_LOG" 2>&1; then
+  if ! ( cd "$REPO_ROOT/docs" && ./node_modules/.bin/vitepress build ) > "$DOCS_LOG" 2>&1; then
     echo "ERROR: vitepress build failed"; tail -20 "$DOCS_LOG" >&2; exit 3
   fi
 
   DOCS_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
   DOCS_URL="http://localhost:${DOCS_PORT}/put-it-out-there/"
-  echo "==> docs: vitepress preview on port $DOCS_PORT → $DOCS_URL"
-  ( cd "$REPO_ROOT/docs" && exec ./node_modules/.bin/vitepress preview --port "$DOCS_PORT" --host 127.0.0.1 ) >> "$DOCS_LOG" 2>&1 &
+  echo "==> docs: custom server on port $DOCS_PORT → $DOCS_URL"
+  node "$EVAL_ROOT/tools/docs-server.mjs" "$REPO_ROOT/docs/.vitepress/dist" "$DOCS_PORT" /put-it-out-there/ >> "$DOCS_LOG" 2>&1 &
   DOCS_PID=$!
   for _ in $(seq 1 30); do
     curl -sf "$DOCS_URL" -o /dev/null 2>/dev/null && { echo "    ready at $DOCS_URL"; break; }
-    sleep 0.3
+    sleep 0.2
   done
-  curl -sf "$DOCS_URL" -o /dev/null 2>/dev/null || { echo "ERROR: preview not ready"; tail -20 "$DOCS_LOG" >&2; exit 3; }
+  curl -sf "$DOCS_URL" -o /dev/null 2>/dev/null || { echo "ERROR: docs server not ready"; tail -20 "$DOCS_LOG" >&2; exit 3; }
 fi
 
 PROMPT_TEXT="$(cat "$FIXTURE_DIR/prompt.md")"
@@ -200,7 +199,7 @@ EOF
       export AGENT_BROWSER_EXECUTABLE_PATH='$CHROME_BIN'
       exec claude -p \
         --model claude-opus-4-7 \
-        --max-budget-usd 5 \
+        --max-budget-usd 8 \
         --output-format text \
         \"\$(cat '$WORK/_prompt.txt')\"
     " > "$RAW" 2>&1
@@ -208,7 +207,7 @@ EOF
     cd "$WORK"
     HOME="$WORK" claude -p \
       --model claude-opus-4-7 \
-      --max-budget-usd 5 \
+      --max-budget-usd 8 \
       --output-format text \
       "$PROMPT_TEXT" \
       > "$RAW"
@@ -324,9 +323,9 @@ EOF
 )
 
 HOME="$WORK" claude -p \
-  --model claude-sonnet-4-6 \
+  --model claude-opus-4-7 \
   --tools "" \
-  --max-budget-usd 1 \
+  --max-budget-usd 2 \
   --output-format text \
   "$EXTRACTION_PROMPT
 

@@ -1,5 +1,11 @@
 # Concepts
 
+> Evaluating piot for a migration? Read [Known gaps](/guide/gaps)
+> alongside this page — it enumerates every non-goal and known
+> limitation in one place, including per-target runner selection,
+> build-side cross-compilation, standalone binary archives, and
+> what `doctor` does and doesn't check.
+
 ## What piot covers
 
 `putitoutthere` (piot) is a **polyglot registry publisher**. Given

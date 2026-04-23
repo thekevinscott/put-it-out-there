@@ -26,6 +26,7 @@ export default defineConfig({
             { text: 'Release trailer', link: '/guide/trailer' },
             { text: 'Cascade', link: '/guide/cascade' },
             { text: 'npm platform packages', link: '/guide/npm-platform-packages' },
+            { text: 'Known gaps', link: '/guide/gaps' },
           ],
         },
         {
