@@ -592,6 +592,7 @@ describe('tokenList', () => {
     paths: ['packages/py/**'],
     depends_on: [],
     first_version: '0.1.0',
+    tag_format: '{name}-v{version}',
     build: 'setuptools',
   };
   const npmPkg: Package = {
@@ -601,6 +602,7 @@ describe('tokenList', () => {
     paths: ['packages/node/**'],
     depends_on: [],
     first_version: '0.1.0',
+    tag_format: '{name}-v{version}',
   };
   const cratesPkg: Package = {
     kind: 'crates',
@@ -609,6 +611,7 @@ describe('tokenList', () => {
     paths: ['crates/core/**'],
     depends_on: [],
     first_version: '0.1.0',
+    tag_format: '{name}-v{version}',
   };
 
   it('classifies pypi- and npm_ prefixed values regardless of config', () => {

@@ -17,6 +17,8 @@ import { readFileSync } from 'node:fs';
 import { parse as parseToml } from 'smol-toml';
 import { z, type ZodError } from 'zod';
 
+import { DEFAULT_TAG_FORMAT } from './tag-template.js';
+
 /* ------------------------------ schemas ------------------------------ */
 
 const PILOT = z
@@ -61,6 +63,20 @@ const PACKAGE_BASE = {
   paths: z.array(z.string()).min(1),
   depends_on: z.array(z.string()).default([]),
   first_version: z.string().default('0.1.0'),
+  // Template for the git tag cut on release. `{version}` is required;
+  // `{name}` is optional (single-package repos can pick `"v{version}"`).
+  // Default matches the historical shape the tool emitted before this
+  // became configurable, so existing repos keep tagging unchanged.
+  tag_format: z
+    .string()
+    .default(DEFAULT_TAG_FORMAT)
+    .refine((s) => s.includes('{version}'), {
+      message: 'tag_format must contain {version}',
+    })
+    .refine((s) => !/\{(?!name\}|version\})[^}]*\}/.test(s), {
+      message:
+        'tag_format contains an unknown placeholder (only {name} and {version} are allowed)',
+    }),
   smoke: z.string().optional(),
   trust_policy: TRUST_POLICY.optional(),
 };

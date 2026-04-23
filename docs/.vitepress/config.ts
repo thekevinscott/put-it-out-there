@@ -24,6 +24,7 @@ export default defineConfig({
             { text: 'Configuration', link: '/guide/configuration' },
             { text: 'Authentication', link: '/guide/auth' },
             { text: 'Release trailer', link: '/guide/trailer' },
+            { text: 'Nightly release', link: '/guide/nightly-release' },
             { text: 'Cascade', link: '/guide/cascade' },
             { text: 'npm platform packages', link: '/guide/npm-platform-packages' },
             { text: 'Known gaps', link: '/guide/gaps' },

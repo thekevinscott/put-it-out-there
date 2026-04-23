@@ -15,6 +15,7 @@ import { computeCascade } from './cascade.js';
 import { loadConfig, type Package } from './config.js';
 import { commitBody, commitParents, diffNames, headCommit, lastTag } from './git.js';
 import { assertTripleSupported } from './handlers/npm-platform.js';
+import { parseTagVersion } from './tag-template.js';
 import { normalizeTarget, type Bump, type Kind, type TargetEntry } from './types.js';
 import { parseTrailer, type Trailer } from './trailer.js';
 import { bump as bumpVersion, firstVersion } from './version.js';
@@ -93,7 +94,7 @@ function collectChanges(
   // instead of one per package (#140).
   const diffCache = new Map<string, ReadonlySet<string>>();
   for (const p of packages) {
-    const tag = lastTag(p.name, { cwd });
+    const tag = lastTag(p.name, p.tag_format, { cwd });
     if (tag === null) {
       firstRelease.add(p.name);
       continue;
@@ -114,11 +115,12 @@ function nextVersion(
   cwd: string,
   trailerPackages: ReadonlySet<string>,
 ): string {
-  const tag = lastTag(pkg.name, { cwd });
+  const tag = lastTag(pkg.name, pkg.tag_format, { cwd });
   if (tag === null) {
     return firstVersion(pkg);
   }
-  const lastVersion = tag.replace(`${pkg.name}-v`, '');
+  /* v8 ignore next -- lastTag only returns tags that parseTagVersion already accepted */
+  const lastVersion = parseTagVersion(pkg.tag_format, pkg.name, tag) ?? firstVersion(pkg);
 
   // Trailer bump applies to every cascaded package, OR specifically to
   // packages listed in [trailer.packages]. If the trailer scoped the
