@@ -73,6 +73,18 @@ targets = [
 ]
 ```
 
+With `build = "napi"` or `build = "bundled-cli"` set, piot synthesizes a per-platform package for each target, publishes them, then rewrites the top-level's `optionalDependencies` to pin them at the just-published version — the esbuild/biome family pattern. See [npm platform packages](/guide/npm-platform-packages) for the full shape.
+
+## Build-side responsibilities
+
+piot covers *publish-side* packaging: given artifacts on disk, it produces the registry publishes described above. It does **not** cross-compile, select GitHub Actions runners, or generate a matrix. Your workflow's `build` job owns:
+
+- Picking runner OSes per target (e.g. `ubuntu-24.04-arm` for `aarch64-unknown-linux-gnu`).
+- Running `maturin build --target …`, `napi build --target …`, `cargo build --target …` etc.
+- Staging the outputs where the `publish` job can find them.
+
+If you want a pre-built CLI archive attached to the GitHub Release (the `curl | tar x` install shape), compose with [`cargo-dist`](https://axodotdev.github.io/cargo-dist/) or [`goreleaser`](https://goreleaser.com/) alongside piot; piot doesn't emit release tarballs.
+
 ## Example
 
 ```toml

@@ -76,6 +76,31 @@ putitoutthere auth logout  [--json]
 putitoutthere auth status  [--json]
 ```
 
+**What `doctor` checks:**
+
+- `putitoutthere.toml` parses, is schema-valid, and has no `depends_on` cycles.
+- For each package: the referenced `path` exists and contains the manifest
+  the handler expects (`Cargo.toml` / `pyproject.toml` / `package.json`).
+- Auth is reachable for every declared registry. For OIDC-first handlers,
+  that means: `id-token: write` permission is present in the current
+  workflow; for long-lived-token fallbacks, the relevant env var is set
+  and non-empty.
+
+**What `doctor` does not check:**
+
+- That a **trusted publisher is registered on the registry** for the
+  current repo/workflow. This is one-time out-of-CI setup (see
+  [Authentication](/guide/auth)) and has to be verified against each
+  registry's settings UI.
+- That the **caller workflow filename matches the registered trust
+  policy.** crates.io and npm pin the filename in the OIDC JWT; piot
+  does not introspect the registered policy to confirm your
+  `release.yml` matches. A mismatch fails at publish with an HTTP 400;
+  the fix is to re-register the policy (or rename the file) and retry.
+- That a specific **target triple is buildable on the runner your
+  workflow selected.** Build-matrix correctness lives in your workflow
+  YAML, not in `putitoutthere.toml`.
+
 ### `putitoutthere version`
 
 Print the CLI version.
