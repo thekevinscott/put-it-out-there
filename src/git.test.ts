@@ -157,26 +157,26 @@ describe('lastTag', () => {
     for (const v of ['pkg-v0.1.0', 'pkg-v0.1.9', 'pkg-v0.10.0', 'pkg-v0.2.0']) {
       createTag(v, sha, { cwd: repo });
     }
-    expect(lastTag('pkg', { cwd: repo })).toBe('pkg-v0.10.0');
+    expect(lastTag('pkg', '{name}-v{version}', { cwd: repo })).toBe('pkg-v0.10.0');
   });
 
   it('returns null when no tags for this package exist', () => {
     commit('first');
-    expect(lastTag('pkg', { cwd: repo })).toBeNull();
+    expect(lastTag('pkg', '{name}-v{version}', { cwd: repo })).toBeNull();
   });
 
   it('ignores tags from other packages', () => {
     const sha = commit('first');
     createTag('other-v9.9.9', sha, { cwd: repo });
     createTag('pkg-v0.1.0', sha, { cwd: repo });
-    expect(lastTag('pkg', { cwd: repo })).toBe('pkg-v0.1.0');
+    expect(lastTag('pkg', '{name}-v{version}', { cwd: repo })).toBe('pkg-v0.1.0');
   });
 
   it('skips malformed tags under the package prefix', () => {
     const sha = commit('first');
     createTag('pkg-v0.1.0', sha, { cwd: repo });
     createTag('pkg-vnope', sha, { cwd: repo });
-    expect(lastTag('pkg', { cwd: repo })).toBe('pkg-v0.1.0');
+    expect(lastTag('pkg', '{name}-v{version}', { cwd: repo })).toBe('pkg-v0.1.0');
   });
 
   it('skips tags matching the glob but rejected by strict semver', () => {
@@ -185,7 +185,17 @@ describe('lastTag', () => {
     const sha = commit('first');
     createTag('pkg-v0.1.0', sha, { cwd: repo });
     createTag('pkg-v01.02.03', sha, { cwd: repo });
-    expect(lastTag('pkg', { cwd: repo })).toBe('pkg-v0.1.0');
+    expect(lastTag('pkg', '{name}-v{version}', { cwd: repo })).toBe('pkg-v0.1.0');
+  });
+
+  it('honors a custom `v{version}` tag_format for single-package repos', () => {
+    const sha = commit('first');
+    createTag('v0.1.0', sha, { cwd: repo });
+    createTag('v0.2.11', sha, { cwd: repo });
+    // Pre-existing default-shaped tag should NOT be selected when the
+    // template is `v{version}` — the glob won't match it.
+    createTag('pkg-v9.9.9', sha, { cwd: repo });
+    expect(lastTag('pkg', 'v{version}', { cwd: repo })).toBe('v0.2.11');
   });
 });
 

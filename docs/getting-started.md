@@ -12,9 +12,9 @@ piot is a good fit if you can answer **yes** to most of these:
 - [ ] Your artifacts publish to some combination of **crates.io, PyPI, and npm** — piot only covers those three registries.
 - [ ] You use (or are willing to use) **OIDC trusted publishing** on each registry. Long-lived tokens work as a fallback, but OIDC is the happy path.
 - [ ] You build your artifacts in **GitHub Actions**. The scaffolded workflow is a GitHub Actions workflow; piot's Action and OIDC flows assume that runtime.
-- [ ] You're comfortable with **one tag per package** (`{name}-v{version}`) rather than a single shared version across all packages.
-- [ ] Your release trigger is a **merge commit** (push to `main`). A commit trailer drives the version bump; piot is not a cron-driven release orchestrator at the tool level (though you can run it from a cron workflow).
-- [ ] You use — or can use — **`release-please` / `release-plz` / `changesets`** for PR-driven version pre-computation, OR commit trailers. piot does not compute bumps from commit-diff heuristics.
+- [ ] You're comfortable with **one tag per package** — defaults to `{name}-v{version}`, or pick your own template via [`tag_format`](/guide/configuration).
+- [ ] Your release trigger is **up to you**: merge to `main`, scheduled cron, or manual dispatch all work. See the [nightly release recipe](/guide/nightly-release) for the cron shape.
+- [ ] The default bump is **`patch` whenever a package's files change**. Opt into explicit `minor`/`major` bumps (or `skip`) via a [commit trailer](/guide/trailer) — trailers are optional.
 
 piot is probably **not** the right tool if:
 

@@ -42,6 +42,55 @@ describe('parseConfig: happy paths', () => {
     expect(cfg.packages[0]!.first_version).toBe('0.1.0');
   });
 
+  it('applies default tag_format = "{name}-v{version}"', () => {
+    const cfg = parseConfig(MINIMAL);
+    expect(cfg.packages[0]!.tag_format).toBe('{name}-v{version}');
+  });
+
+  it('accepts a custom tag_format like "v{version}"', () => {
+    const cfg = parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name       = "app"
+kind       = "crates"
+path       = "."
+paths      = ["**"]
+tag_format = "v{version}"
+`);
+    expect(cfg.packages[0]!.tag_format).toBe('v{version}');
+  });
+
+  it('rejects a tag_format missing {version}', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name       = "app"
+kind       = "crates"
+path       = "."
+paths      = ["**"]
+tag_format = "{name}-v"
+`),
+    ).toThrow(/tag_format must contain \{version\}/);
+  });
+
+  it('rejects a tag_format with an unknown placeholder', () => {
+    expect(() =>
+      parseConfig(`
+[putitoutthere]
+version = 1
+[[package]]
+name       = "app"
+kind       = "crates"
+path       = "."
+paths      = ["**"]
+tag_format = "{name}-{bogus}-v{version}"
+`),
+    ).toThrow(/unknown placeholder/);
+  });
+
   it('applies default pypi build = "setuptools" when omitted (#129)', () => {
     const cfg = parseConfig(`
 [putitoutthere]

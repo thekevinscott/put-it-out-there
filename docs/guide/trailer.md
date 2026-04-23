@@ -1,6 +1,8 @@
 # Release trailer
 
-Add a `release:` trailer to the merge commit body to override the default patch-on-cascade behavior.
+The trailer is **optional**. putitoutthere already knows how to release on its own: if a commit changed a file inside a package's `paths`, that package cascades and ships at `patch`. The trailer exists to override that default — bump `minor`/`major`, skip a release entirely, or scope a bump to specific packages.
+
+If you just want "patch whenever something changes," you don't need to write a trailer at all. Nightly cron workflows lean on this — see the [nightly release recipe](./nightly-release.md).
 
 ## Grammar
 

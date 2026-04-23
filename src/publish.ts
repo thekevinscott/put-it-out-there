@@ -24,6 +24,7 @@ import { createTag, headCommit, pushTag } from './git.js';
 import { handlerFor as defaultHandlerFor } from './handlers/index.js';
 import { createLogger } from './log.js';
 import { plan, type MatrixRow } from './plan.js';
+import { formatTag } from './tag-template.js';
 import { checkAuth, requireAuth } from './preflight.js';
 import { createGitHubRelease, generateReleaseNotes } from './release.js';
 import { withRetry } from './retry.js';
@@ -175,7 +176,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
       published.push({ package: name, version, result });
 
       if (result.status === 'published') {
-        const tagName = `${name}-v${version}`;
+        const tagName = formatTag(pkg.tag_format, { name, version });
         createTag(tagName, head, { cwd, message: `Release ${tagName}` });
         try {
           pushTag(tagName, { cwd });

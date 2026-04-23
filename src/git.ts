@@ -10,6 +10,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { parseTagVersion, tagGlob } from './tag-template.js';
 import { parseSemver, type Semver } from './version.js';
 
 export interface GitOptions {
@@ -96,27 +97,31 @@ export function pushTag(name: string, opts: GitOptions = {}): void {
 /**
  * Find the highest-semver tag for a given package.
  *
- * Tag format is fixed (plan.md §14.1): `{packageName}-v{major}.{minor}.{patch}`.
- * We glob-filter by prefix, parse each candidate, and return the highest.
- * Malformed candidates that match the glob but not strict semver are
- * skipped silently — they're operator noise, not tool output.
+ * Tag shape comes from the package's `tag_format` template (default
+ * `{name}-v{version}`). We glob-filter, parse each candidate against
+ * the template, and return the highest. Malformed candidates that
+ * match the glob but not strict semver are skipped silently — they're
+ * operator noise, not tool output.
  *
  * Returns null when no tag for this package exists.
  */
-export function lastTag(packageName: string, opts: GitOptions = {}): string | null {
-  const prefix = `${packageName}-v`;
-  const candidates = tagList(`${prefix}*.*.*`, opts);
+export function lastTag(
+  packageName: string,
+  tagFormat: string,
+  opts: GitOptions = {},
+): string | null {
+  const candidates = tagList(tagGlob(tagFormat, packageName), opts);
 
   let best: { tag: string; version: Semver } | null = null;
   for (const tag of candidates) {
-    /* v8 ignore next -- tagList already glob-filters by prefix; defensive */
-    if (!tag.startsWith(prefix)) continue;
-    const versionPart = tag.slice(prefix.length);
+    const versionPart = parseTagVersion(tagFormat, packageName, tag);
+    if (versionPart === null) continue;
     let parsed: Semver;
     try {
       parsed = parseSemver(versionPart);
+      /* v8 ignore next 3 -- parseTagVersion already validated semver; defensive */
     } catch {
-      continue; // skip malformed
+      continue;
     }
     if (!best || greater(parsed, best.version)) {
       best = { tag, version: parsed };
