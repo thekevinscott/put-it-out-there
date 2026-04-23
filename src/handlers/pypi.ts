@@ -24,7 +24,7 @@ import { parse as parseToml } from 'smol-toml';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
-import { nonEmpty } from '../env.js';
+import { buildSubprocessEnv, nonEmpty } from '../env.js';
 
 const REGISTRY = 'https://pypi.org';
 
@@ -120,7 +120,9 @@ async function publishImpl(
         'pypi: no auth available. Either:',
         '  - set PYPI_API_TOKEN (classic API token), or',
         '  - enable trusted publishing: add `permissions.id-token: write` to the job and register a pending publisher on pypi.org.',
-        'See plan.md §16.4.2 for setup.',
+        // Points consumers at the published auth guide, not internal plan
+        // docs (#149).
+        'See https://thekevinscott.github.io/put-it-out-there/guide/auth for setup.',
       ].join('\n'),
     );
   }
@@ -131,12 +133,12 @@ async function publishImpl(
   try {
     execFileSync('twine', ['upload', '--non-interactive', '--disable-progress-bar', ...files], {
       cwd: ctx.cwd,
-      env: {
-        ...process.env,
-        ...ctx.env,
+      // #138: minimal env. Don't forward the whole parent process.env
+      // to twine.
+      env: buildSubprocessEnv(ctx.env, {
         TWINE_USERNAME: '__token__',
         TWINE_PASSWORD: token,
-      },
+      }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {

@@ -592,6 +592,7 @@ describe('tokenList', () => {
     paths: ['packages/py/**'],
     depends_on: [],
     first_version: '0.1.0',
+    build: 'setuptools',
   };
   const npmPkg: Package = {
     kind: 'npm',
@@ -939,5 +940,43 @@ describe('tokenListSecrets', () => {
     });
     expect(outcome.kind).toBe('ok');
     expect(seen[0]).toBe('Bearer ghu_test_secrets');
+  });
+
+  it('ignores an apiBase override outside NODE_ENV=test (#139)', async () => {
+    // Simulate a production caller trying to smuggle an attacker URL.
+    const prevNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const hitAttacker: string[] = [];
+      const hitGitHub: string[] = [];
+      server.use(
+        http.get('https://attacker.example/repos/octo/hello/actions/secrets', ({ request }) => {
+          hitAttacker.push(request.headers.get('authorization') ?? '');
+          return HttpResponse.json({ total_count: 0, secrets: [] });
+        }),
+        http.get('https://api.github.com/repos/octo/hello/actions/secrets', ({ request }) => {
+          hitGitHub.push(request.headers.get('authorization') ?? '');
+          return HttpResponse.json({ total_count: 0, secrets: [] });
+        }),
+        http.get('https://api.github.com/repos/octo/hello/environments', () =>
+          HttpResponse.json({ total_count: 0, environments: [] }),
+        ),
+      );
+
+      const outcome = await tokenListSecrets({
+        keyring: memoryKeyring(mkAuth()),
+        repo: 'octo/hello',
+        apiBase: 'https://attacker.example',
+      });
+
+      expect(outcome.kind).toBe('ok');
+      // The Bearer token must never reach the attacker host; the
+      // request went to the real GitHub API base instead.
+      expect(hitAttacker).toEqual([]);
+      expect(hitGitHub).toHaveLength(1);
+    } finally {
+      if (prevNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = prevNodeEnv;
+    }
   });
 });

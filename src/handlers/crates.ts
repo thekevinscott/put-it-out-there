@@ -33,6 +33,7 @@ import { join, relative } from 'node:path';
 
 import type { Ctx, Handler, PublishResult } from '../types.js';
 import { TransientError } from '../types.js';
+import { buildSubprocessEnv } from '../env.js';
 
 const REGISTRY = 'https://crates.io';
 
@@ -124,11 +125,11 @@ async function publishImpl(
   try {
     execFileSync('cargo', args, {
       cwd: ctx.cwd,
-      env: {
-        ...process.env,
-        ...ctx.env,
-        CARGO_TERM_VERBOSE: 'true',
-      },
+      // #138: minimal env. The parent process.env leaks unrelated
+      // secrets to cargo; forward only a known-safe baseline plus the
+      // workflow-declared ctx.env (which carries CARGO_REGISTRY_TOKEN
+      // and OIDC vars when present).
+      env: buildSubprocessEnv(ctx.env, { CARGO_TERM_VERBOSE: 'true' }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {
