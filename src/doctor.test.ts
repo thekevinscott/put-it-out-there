@@ -18,6 +18,11 @@ let repo: string;
 beforeEach(() => {
   repo = mkdtempSync(join(tmpdir(), 'doctor-test-'));
   mkdirSync(join(repo, 'packages/rust'), { recursive: true });
+  // #189: CI runners set GITHUB_WORKFLOW_REF, which my declared-diff
+  // phase reads. Clear it so tests start from a consistent state
+  // regardless of where they run.
+  delete process.env.GITHUB_WORKFLOW_REF;
+  delete process.env.CRATES_IO_DOCTOR_TOKEN;
 });
 
 afterEach(() => {
@@ -26,6 +31,11 @@ afterEach(() => {
   delete process.env.PYPI_API_TOKEN;
   delete process.env.NODE_AUTH_TOKEN;
   delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  delete process.env.CRATES_IO_DOCTOR_TOKEN;
+  // #189: CI runners set GITHUB_WORKFLOW_REF. Tests that assert a green
+  // declared-diff phase need a clean slate so the ref-diff doesn't
+  // fire against the CI workflow name.
+  delete process.env.GITHUB_WORKFLOW_REF;
 });
 
 function writeCfg(body: string): void {
@@ -535,6 +545,28 @@ workflow = "release.yml"
     expect(result.ok).toBe(false);
     expect(result.trustPolicyDeclared?.packages[0]?.workflow_ok).toBe(false);
     expect(result.issues.join('\n')).toMatch(/declared workflow release\.yml/);
+    delete process.env.CARGO_REGISTRY_TOKEN;
+  });
+
+  it('fails when GITHUB_WORKFLOW_REF disagrees with declared workflow', async () => {
+    writeCfg(`
+[putitoutthere]
+version = 1
+[[package]]
+name  = "lib"
+kind  = "crates"
+path  = "packages/rust"
+paths = ["packages/rust/**"]
+[package.trust_policy]
+workflow = "release.yml"
+`);
+    process.env.CARGO_REGISTRY_TOKEN = 'tok';
+    process.env.GITHUB_WORKFLOW_REF = 'octo/hello/.github/workflows/ci.yml@refs/heads/main';
+    writeWorkflow(GOOD_WORKFLOW);
+    const result = await doctor({ cwd: repo });
+    expect(result.ok).toBe(false);
+    expect(result.trustPolicyDeclared?.packages[0]?.ref_ok).toBe(false);
+    expect(result.issues.join('\n')).toMatch(/GITHUB_WORKFLOW_REF/);
     delete process.env.CARGO_REGISTRY_TOKEN;
   });
 
