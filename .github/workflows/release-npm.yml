@@ -3,14 +3,16 @@ name: Release (dogfood)
 # putitoutthere releases itself using itself.
 #
 # On push to main OR manual dispatch:
-#   1. Build the dist bundle.
-#   2. `putitoutthere plan` against the committed putitoutthere.toml
+#   1. `putitoutthere plan` against the committed putitoutthere.toml
 #      + the current HEAD trailer, emit matrix JSON to GITHUB_OUTPUT.
-#   3. If the plan is non-empty, `putitoutthere publish` does the
-#      npm publish, writeVersion, and tagging.
-#
-# Replaces release-npm.yml's manual `npm publish` with the dogfood
-# path once wave-4 + CLI land.
+#   2. If the plan is non-empty, the publish job rebuilds the ncc
+#      action bundle, folds it into a release-only commit (the bundle
+#      is gitignored on main and lives only on tag commits), then
+#      `putitoutthere publish` does the npm publish, writeVersion,
+#      and tagging — tag points at the bundle-bearing commit.
+#   3. The floating `v<major>` tag is moved to the new release commit
+#      so scaffolded consumer workflows (`uses: ...@v1`) resolve to a
+#      ref that has `dist-action/index.js` under it.
 
 on:
   push:
@@ -52,9 +54,6 @@ jobs:
 
       - name: Build SDK
         run: pnpm run build
-
-      - name: Rebuild action bundle
-        run: pnpm run build:action
 
       - id: plan
         name: putitoutthere plan
@@ -100,6 +99,23 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # `dist-action/` is gitignored on main; the action bundle exists only on
+      # tag commits. Fold the freshly-built bundle into a release-only commit
+      # so the per-package tag (and the floating `v<major>` tag that tracks
+      # it) resolve to a commit that contains `dist-action/index.js`. The
+      # commit is not pushed to main — it lives only as the tag's target.
+      # See notes/handoff/2026-04-24-dist-action.md.
+      - name: Fold action bundle into release commit
+        if: ${{ inputs.dry_run != 'true' }}
+        run: |
+          set -euo pipefail
+          git add -f dist-action/
+          if git diff --cached --quiet; then
+            echo "No bundle changes to commit (unexpected — build:action should have produced output)." >&2
+            exit 1
+          fi
+          git commit -m "chore(release): bundle action"
 
       - name: putitoutthere publish
         env:
