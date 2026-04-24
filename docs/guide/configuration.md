@@ -24,6 +24,7 @@ Shared fields across every `kind`:
 | `first_version` | string   | no       | Default `0.1.0`.                                  |
 | `tag_format`    | string   | no       | Template for the git tag cut on release. Default `"{name}-v{version}"`. Single-package repos can pick `"v{version}"`. `{version}` is required; `{name}` is optional. |
 | `trust_policy`  | table    | no       | Declared OIDC trust-policy expectations — see [Authentication](./auth.md#declaring-trust-policy-expectations). |
+| `build_workflow`| string   | no       | Bare filename of a consumer-supplied `workflow_call` workflow to dispatch for this package's build, e.g. `"publish-python.yml"`. When set, piot's `plan` stamps the filename onto every matrix row for this package; your `release.yml` reads the field and branches to `uses: ./.github/workflows/<file>`. Use when piot's default build modes don't fit your shape. Details + worked example: [custom build workflows](./custom-build-workflows.md). |
 
 ### `kind = "crates"`
 

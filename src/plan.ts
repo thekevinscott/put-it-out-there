@@ -30,6 +30,13 @@ export interface MatrixRow {
   artifact_path: string;
   path: string;          // package working dir
   build?: string;        // handler-specific build mode
+  // #216: bare filename of a consumer-supplied `workflow_call` workflow
+  // to dispatch for this package's build, e.g. "publish-python.yml". Set
+  // from the package's config; empty for packages that use piot's default
+  // in-line build steps. The consumer's release.yml is expected to
+  // branch on this field — GitHub Actions doesn't support dynamic
+  // `uses:`, so piot can't auto-wire the composition.
+  build_workflow?: string;
 }
 
 export interface PlanOptions {
@@ -72,7 +79,15 @@ export function plan(opts: PlanOptions): Promise<MatrixRow[]> {
   for (const p of config.packages) {
     if (!cascaded.has(p.name)) continue;
     const version = nextVersion(p, trailer?.bump, cwd, forced);
-    rows.push(...rowsForPackage(p, version));
+    const pkgRows = rowsForPackage(p, version);
+    // #216: stamp `build_workflow` onto every row for this package so
+    // the consumer's release.yml can branch per-row instead of having
+    // to look up the package by name.
+    const buildWorkflow = (p as { build_workflow?: string }).build_workflow;
+    if (buildWorkflow !== undefined) {
+      for (const r of pkgRows) r.build_workflow = buildWorkflow;
+    }
+    rows.push(...pkgRows);
   }
   return Promise.resolve(rows);
 }
