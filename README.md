@@ -92,6 +92,30 @@ A change to `packages/rust/` cascades: the crate ships, and the Python + npm
 wrappers ship on top (bumped to match). A change to only the TS shim ships
 just the npm package.
 
+## Library shapes
+
+End-to-end walkthroughs — config + `release.yml` + prerequisites + gotchas —
+for the common shapes. Pick the one that matches your repo:
+
+**Single-package**
+
+- [Python library](https://thekevinscott.github.io/put-it-out-there/guide/shapes/python-library) — one `pyproject.toml` to PyPI
+- [npm library](https://thekevinscott.github.io/put-it-out-there/guide/shapes/npm-library) — one `package.json` to npm
+- [Rust crate](https://thekevinscott.github.io/put-it-out-there/guide/shapes/rust-crate) — one `Cargo.toml` to crates.io
+
+**Rust core, multi-registry**
+
+- [Rust + PyO3 wheels](https://thekevinscott.github.io/put-it-out-there/guide/shapes/rust-pyo3) — crate + PyPI (no napi)
+- [Rust + napi npm](https://thekevinscott.github.io/put-it-out-there/guide/shapes/rust-napi) — crate + npm family (no PyPI)
+- [Polyglot Rust library](https://thekevinscott.github.io/put-it-out-there/guide/shapes/polyglot-rust) — all three registries from one core
+
+**Distribution patterns**
+
+- [Bundled-CLI npm family](https://thekevinscott.github.io/put-it-out-there/guide/shapes/bundled-cli) — compiled CLI shipped as an npm per-platform family
+- [Dual-family npm (CLI + napi)](https://thekevinscott.github.io/put-it-out-there/guide/shapes/dual-family-npm) — one library with both an addon and a binary
+
+Full index at [guide/shapes/](https://thekevinscott.github.io/put-it-out-there/guide/shapes/).
+
 ## Trusted publishers
 
 Preferred over long-lived tokens. One-time setup per registry:
