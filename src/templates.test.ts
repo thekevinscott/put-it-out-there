@@ -59,6 +59,26 @@ describe('release.yml.immediate', () => {
     expect(y).toContain('${{ matrix.artifact_name }}');
     expect(y).toContain('${{ matrix.artifact_path }}');
   });
+
+  it('publish job installs Python + twine (pypi handler shells out to twine — #205)', () => {
+    const y = RELEASE_YML_IMMEDIATE;
+    expect(y).toMatch(/actions\/setup-python@v5/);
+    expect(y).toMatch(/pip install twine/);
+  });
+
+  it('publish job configures git committer identity (createTag uses git tag -a — #206)', () => {
+    const y = RELEASE_YML_IMMEDIATE;
+    expect(y).toMatch(/git config --global user\.name/);
+    expect(y).toMatch(/git config --global user\.email/);
+    // github-actions[bot] canonical noreply, not a random bot identity.
+    expect(y).toContain('41898282+github-actions[bot]@users.noreply.github.com');
+  });
+
+  it('build + publish jobs run on Node 24 (#208)', () => {
+    const y = RELEASE_YML_IMMEDIATE;
+    expect(y).not.toContain("node-version: '20'");
+    expect(y).toMatch(/node-version: '24'/);
+  });
 });
 
 describe('release.yml.scheduled', () => {
