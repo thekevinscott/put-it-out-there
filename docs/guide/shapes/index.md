@@ -22,6 +22,18 @@ package manager.
 - [**Single-package Rust crate**](/guide/shapes/rust-crate) —
   one `Cargo.toml`, publishing to crates.io. No PyO3, no napi.
 
+## Multi-package workspaces
+
+Many packages from one repo. piot doesn't auto-discover them —
+declare each one explicitly — but it does orchestrate cascade,
+topological order, and per-package publishing.
+
+- [**Multi-crate Rust workspace**](/guide/shapes/rust-workspace) —
+  multiple crates to crates.io with `depends_on`-driven cascade.
+- [**Multi-package npm workspace**](/guide/shapes/npm-workspace) —
+  multiple npm packages from one workspace, sharing a
+  dependency graph.
+
 ## Rust core, multiple registries
 
 One Rust crate feeds multiple artifacts on multiple registries.
@@ -29,6 +41,9 @@ One Rust crate feeds multiple artifacts on multiple registries.
 - [**Rust + PyO3 wheels**](/guide/shapes/rust-pyo3) — crate on
   crates.io + PyO3 wheels on PyPI via `maturin`, no napi.
   Subset of the polyglot shape.
+- [**Python wheels with C/C++ extensions**](/guide/shapes/python-cibuildwheel) —
+  `setuptools` or `hatch` + `cibuildwheel` for the
+  `pillow` / `lxml` / `numpy` shape (C/C++/Cython, not Rust).
 - [**Rust + napi npm**](/guide/shapes/rust-napi) — crate on
   crates.io + napi-rs family on npm, no PyPI. The inverse.
 - [**Polyglot Rust library**](/guide/shapes/polyglot-rust) — the

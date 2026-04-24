@@ -99,22 +99,28 @@ for the common shapes. Pick the one that matches your repo:
 
 **Single-package**
 
-- [Python library](https://thekevinscott.github.io/put-it-out-there/guide/shapes/python-library) — one `pyproject.toml` to PyPI
-- [npm library](https://thekevinscott.github.io/put-it-out-there/guide/shapes/npm-library) — one `package.json` to npm
-- [Rust crate](https://thekevinscott.github.io/put-it-out-there/guide/shapes/rust-crate) — one `Cargo.toml` to crates.io
+- [Python library](./docs/guide/shapes/python-library.md) — one `pyproject.toml` to PyPI
+- [npm library](./docs/guide/shapes/npm-library.md) — one `package.json` to npm
+- [Rust crate](./docs/guide/shapes/rust-crate.md) — one `Cargo.toml` to crates.io
+
+**Multi-package workspaces**
+
+- [Rust workspace](./docs/guide/shapes/rust-workspace.md) — multiple crates with `depends_on` cascade
+- [npm workspace](./docs/guide/shapes/npm-workspace.md) — multiple npm packages, shared dependency graph
 
 **Rust core, multi-registry**
 
-- [Rust + PyO3 wheels](https://thekevinscott.github.io/put-it-out-there/guide/shapes/rust-pyo3) — crate + PyPI (no napi)
-- [Rust + napi npm](https://thekevinscott.github.io/put-it-out-there/guide/shapes/rust-napi) — crate + npm family (no PyPI)
-- [Polyglot Rust library](https://thekevinscott.github.io/put-it-out-there/guide/shapes/polyglot-rust) — all three registries from one core
+- [Rust + PyO3 wheels](./docs/guide/shapes/rust-pyo3.md) — crate + PyPI (no napi)
+- [Rust + napi npm](./docs/guide/shapes/rust-napi.md) — crate + npm family (no PyPI)
+- [Polyglot Rust library](./docs/guide/shapes/polyglot-rust.md) — all three registries from one core
+- [Python wheels with C extensions](./docs/guide/shapes/python-cibuildwheel.md) — `cibuildwheel` for the `pillow`/`lxml`/`numpy` shape
 
 **Distribution patterns**
 
-- [Bundled-CLI npm family](https://thekevinscott.github.io/put-it-out-there/guide/shapes/bundled-cli) — compiled CLI shipped as an npm per-platform family
-- [Dual-family npm (CLI + napi)](https://thekevinscott.github.io/put-it-out-there/guide/shapes/dual-family-npm) — one library with both an addon and a binary
+- [Bundled-CLI npm family](./docs/guide/shapes/bundled-cli.md) — compiled CLI shipped as an npm per-platform family
+- [Dual-family npm (CLI + napi)](./docs/guide/shapes/dual-family-npm.md) — one library with both an addon and a binary
 
-Full index at [guide/shapes/](https://thekevinscott.github.io/put-it-out-there/guide/shapes/).
+Full index at [`docs/guide/shapes/`](./docs/guide/shapes/).
 
 ## Trusted publishers
 
