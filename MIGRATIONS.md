@@ -59,7 +59,7 @@ And in the Python package's `pyproject.toml`:
 +include = ["...", "src/my_py/_binary/**"]  # ship the staged binary
 ```
 
-See [Polyglot Rust library → Shipping a Rust CLI inside the PyPI wheel](./docs/guide/shapes/polyglot-rust.md#shipping-a-rust-cli-inside-the-pypi-wheel)
+See [Polyglot Rust library → Shipping a Rust CLI inside the PyPI wheel](/guide/shapes/polyglot-rust#shipping-a-rust-cli-inside-the-pypi-wheel)
 for the full worked example including the launcher stub.
 
 **Deprecations removed.** None.
