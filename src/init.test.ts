@@ -10,6 +10,7 @@
  * Issue #20. Plan: §17.
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -60,7 +61,7 @@ describe('init', () => {
     const a = readFileSync(join(repo, 'putitoutthere', 'AGENTS.md'), 'utf8');
     expect(a).toContain('release: <patch|minor|major|skip>');
     expect(a).toContain('Squash and merge');
-    expect(a).toContain('release: minor [dirsql-rust, dirsql-python]');
+    expect(a).toContain('release: minor [my-crate, my-py]');
   });
 
   it('CLAUDE.md gets @putitoutthere/AGENTS.md appended', () => {
@@ -163,6 +164,64 @@ describe('init', () => {
     expect(r.alreadyPresent).toContain('putitoutthere/AGENTS.md');
     expect(r.skipped).not.toContain('putitoutthere/AGENTS.md');
     expect(readFileSync(agentsPath, 'utf8')).toBe('# custom agents doc\n');
+  });
+
+  it('suggests tag_format = "v{version}" when existing v* tags are present and there are no <name>-v* tags (#204)', () => {
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 't@e.c'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
+    execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: repo });
+    writeFileSync(join(repo, 'x'), 'x');
+    execFileSync('git', ['add', '.'], { cwd: repo });
+    execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: repo });
+    execFileSync('git', ['tag', 'v0.1.0'], { cwd: repo });
+    execFileSync('git', ['tag', 'v0.2.0'], { cwd: repo });
+
+    const r = init({ cwd: repo });
+
+    expect(r.notes.some((n) => n.includes('v{version}'))).toBe(true);
+    const toml = readFileSync(join(repo, 'putitoutthere.toml'), 'utf8');
+    expect(toml).toContain('existing v*-style tag history');
+    // The suggestion should reference the concrete tags it saw.
+    expect(toml).toMatch(/v0\.[12]\.0/);
+  });
+
+  it('does NOT suggest v{version} when <name>-v* tags are present (polyglot shape)', () => {
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 't@e.c'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
+    execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: repo });
+    writeFileSync(join(repo, 'x'), 'x');
+    execFileSync('git', ['add', '.'], { cwd: repo });
+    execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: repo });
+    execFileSync('git', ['tag', 'v0.1.0'], { cwd: repo });
+    execFileSync('git', ['tag', 'my-crate-v0.1.0'], { cwd: repo });
+
+    const r = init({ cwd: repo });
+
+    expect(r.notes.filter((n) => n.includes('tag_format'))).toEqual([]);
+    const toml = readFileSync(join(repo, 'putitoutthere.toml'), 'utf8');
+    expect(toml).not.toContain('existing v*-style tag history');
+  });
+
+  it('does NOT suggest v{version} on a repo with no tags', () => {
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 't@e.c'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
+    execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: repo });
+    writeFileSync(join(repo, 'x'), 'x');
+    execFileSync('git', ['add', '.'], { cwd: repo });
+    execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: repo });
+
+    const r = init({ cwd: repo });
+
+    expect(r.notes).toEqual([]);
+  });
+
+  it('init on a non-git directory does not crash and emits no tag_format note', () => {
+    const r = init({ cwd: repo });
+    expect(r.notes).toEqual([]);
+    expect(existsSync(join(repo, 'putitoutthere.toml'))).toBe(true);
   });
 
   it('only `putitoutthere.toml` lands in `skipped` — the --force-gated set (#131)', () => {

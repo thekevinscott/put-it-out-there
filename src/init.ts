@@ -16,10 +16,11 @@
  * Issue #20 / #25. Plan: §9, §17.
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { AGENTS_MD, CHECK_YML, releaseYml, TOML_SKELETON, type Cadence } from './templates.js';
+import { AGENTS_MD, CHECK_YML, releaseYml, tomlSkeleton, type Cadence } from './templates.js';
 
 export interface InitOptions {
   cwd: string;
@@ -45,6 +46,12 @@ export interface InitResult {
    */
   alreadyPresent: string[];
   backedUp: string[];
+  /**
+   * Short notes for the CLI to surface to the user — e.g. "detected
+   * existing v* tags; suggested tag_format = \"v{version}\" in the
+   * skeleton." Not errors; just signal about automatic decisions.
+   */
+  notes: string[];
 }
 
 export function init(opts: InitOptions): InitResult {
@@ -52,15 +59,41 @@ export function init(opts: InitOptions): InitResult {
   const force = Boolean(opts.force);
   const agent = opts.agent ?? 'claude';
   const cadence: Cadence = opts.cadence ?? 'immediate';
-  const result: InitResult = { wrote: [], skipped: [], alreadyPresent: [], backedUp: [] };
+  const result: InitResult = {
+    wrote: [],
+    skipped: [],
+    alreadyPresent: [],
+    backedUp: [],
+    notes: [],
+  };
 
   // 1. putitoutthere.toml  -- `--force`-gated.
+  // Detect single-package shape + existing v* tag history so we suggest
+  // `tag_format = "v{version}"` instead of leaving the commented-out
+  // default — which would fork a parallel {name}-v{version} timeline on
+  // repos that already tag as v*. #204.
+  const suggestion = detectTagFormatSuggestion(cwd);
   const tomlPath = join(cwd, 'putitoutthere.toml');
   if (existsSync(tomlPath) && !force) {
     result.skipped.push('putitoutthere.toml');
   } else {
-    writeAtomic(tomlPath, TOML_SKELETON);
+    const seeds = suggestion
+      ? {
+          tag_format: suggestion.tag_format,
+          tag_format_reason: `existing v*-style tag history (${suggestion.detectedTags
+            .slice(0, 3)
+            .join(', ')}${suggestion.detectedTags.length > 3 ? ', …' : ''})`,
+        }
+      : null;
+    writeAtomic(tomlPath, tomlSkeleton(seeds));
     result.wrote.push('putitoutthere.toml');
+    if (suggestion !== null) {
+      result.notes.push(
+        `tag_format: detected existing \`v*\` tags (${suggestion.detectedTags.slice(0, 3).join(', ')}${
+          suggestion.detectedTags.length > 3 ? ', …' : ''
+        }); suggested \`tag_format = "v{version}"\` in putitoutthere.toml to keep the existing timeline. Edit the file to override.`,
+      );
+    }
   }
 
   // 2. putitoutthere/AGENTS.md  -- not `--force`-gated; users edit this.
@@ -132,4 +165,64 @@ function writeAtomic(path: string, contents: string): void {
   // passes an os.tmpdir() subpath here, and that's controlled input.
   mkdirSync(dirname(path), { recursive: true, mode: 0o755 });
   writeFileSync(path, contents, { encoding: 'utf8', mode: 0o644 });
+}
+
+/**
+ * Shape returned when the repo already carries a `v{X.Y.Z}` tag
+ * history. The caller embeds a `tag_format = "v{version}"` line in
+ * the emitted TOML skeleton and surfaces a note to the user.
+ */
+export interface TagFormatSuggestion {
+  tag_format: 'v{version}';
+  detectedTags: string[];
+}
+
+/**
+ * Look for strict-semver `v*` tags on the current checkout. When
+ * present (and no `<name>-v*` tags are also present), suggest
+ * `tag_format = "v{version}"` in the skeleton so the adopter's next
+ * release stays on their existing tag timeline instead of starting a
+ * parallel `{name}-v{version}` one. #204.
+ *
+ * Returns null in any of these cases (default `{name}-v{version}` is
+ * right):
+ * - Not a git repo / `git` not on PATH.
+ * - No `v{X.Y.Z}` tags.
+ * - `<name>-v*` tags already exist (the repo is polyglot-shaped).
+ */
+function detectTagFormatSuggestion(cwd: string): TagFormatSuggestion | null {
+  let vTags: string[];
+  try {
+    const out = execFileSync('git', ['tag', '-l', 'v*.*.*'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+      .trim()
+      .split('\n')
+      .filter((l) => /^v\d+\.\d+\.\d+$/.test(l));
+    vTags = out;
+  } catch {
+    return null;
+  }
+  if (vTags.length === 0) return null;
+
+  // If any `<name>-v*` tag exists, the repo is polyglot-shaped; don't
+  // hijack the default.
+  try {
+    const out = execFileSync('git', ['tag', '-l', '*-v*.*.*'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+      .trim()
+      .split('\n')
+      .filter((l) => /^.+-v\d+\.\d+\.\d+$/.test(l));
+    if (out.length > 0) return null;
+  } catch {
+    /* fall through — `git` just succeeded above, this path shouldn't
+     * diverge, but belt-and-braces for unusual filesystems. */
+  }
+
+  return { tag_format: 'v{version}', detectedTags: vTags };
 }
