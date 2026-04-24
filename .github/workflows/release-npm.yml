@@ -110,3 +110,32 @@ jobs:
             DRY_RUN_FLAG="--dry-run"
           fi
           node dist/cli.js publish $DRY_RUN_FLAG
+
+      # Scaffolded workflows reference `thekevinscott/put-it-out-there@v<major>`
+      # (community GitHub Actions convention, e.g. actions/checkout@v4). The
+      # canonical per-release tag is `putitoutthere-v<x.y.z>`; this step keeps
+      # a floating `v<major>` tag pointing at the latest release in the major
+      # line so the scaffold resolves. Idempotent: re-runs are a no-op when
+      # the floating tag already matches the latest release. Issue #199.
+      - name: Move floating major tag
+        if: ${{ inputs.dry_run != 'true' }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin
+          latest=$(git tag --list 'putitoutthere-v*' | sort -V | tail -n1 || true)
+          if [ -z "$latest" ]; then
+            echo "No putitoutthere-v* tags yet; nothing to track."
+            exit 0
+          fi
+          version="${latest#putitoutthere-v}"
+          major="${version%%.*}"
+          floating="v${major}"
+          target=$(git rev-parse "${latest}^{commit}")
+          current=$(git rev-parse --verify --quiet "refs/tags/${floating}^{commit}" || true)
+          if [ "${current}" = "${target}" ]; then
+            echo "Floating tag ${floating} already at ${latest}; no update."
+            exit 0
+          fi
+          echo "Moving floating tag ${floating} -> ${target} (latest release ${latest})"
+          git tag -f "${floating}" "${target}"
+          git push --force origin "refs/tags/${floating}"
