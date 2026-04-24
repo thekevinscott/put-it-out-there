@@ -22,6 +22,12 @@ Reference docs for behavior that *should* exist but doesn't are worse than no do
 - Tables with `| Field | Type | Notes |` shape; left-align every column.
 - Avoid `we` and `our`. Address the reader as "you."
 - No emoji in body text (the home-page features block is the exception).
+- **Generic names in worked examples.** Use `my-lib`, `my-crate`,
+  `my-py`, `my-napi`, `my-cli`, `my-org` — never real library or
+  organisation names from outside this repo. Real names read as
+  endorsements and decay when the referenced project does. Matches
+  what `src/templates.ts` emits at `init` time, so adopters see the
+  same placeholders in docs as in their scaffolded TOML.
 
 ## Testing
 

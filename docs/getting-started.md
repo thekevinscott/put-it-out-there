@@ -53,13 +53,25 @@ to piot, two things trip up most migrations:
 - **Tags are per package, not shared.** piot tags each package
   independently as `{name}-v{version}`. Anything reading a single
   shared `v{version}` tag today (install scripts, doc links, release
-  notes scripts) needs updating.
+  notes scripts) needs updating. Single-package repos often want
+  `tag_format = "v{version}"` instead, to keep the existing timeline
+  — see [Configuration](/guide/configuration).
+- **Dynamic-version `pyproject.toml`.** If your PyPI package uses
+  `[project].dynamic = ["version"]` with hatch-vcs / setuptools-scm,
+  piot skips the pyproject rewrite (the build backend owns the
+  computation). You need to pass the planned version to the build
+  backend via an env var, or you'll ship `<pkg>-X.Y.Z.devN.tar.gz`
+  instead of `<pkg>-X.Y.Z.tar.gz`. See
+  [dynamic versions](/guide/dynamic-versions) for the recipe.
 
-## Common library shapes
+## Pick your library shape
 
-Worked examples for the common shapes:
+Worked end-to-end examples for the common shapes. Pick the one that matches your repo:
 
-- [Polyglot Rust library (Rust crate + PyO3 wheel + napi npm)](/guide/handoffs/polyglot-rust) — the dirsql shape.
+- [**Single-package Python library**](/guide/shapes/python-library) — one `pyproject.toml`, publishing to PyPI. Covers static-version and dynamic-version (`hatch-vcs` / `setuptools-scm`) setups.
+- [**Polyglot Rust library** (Rust crate + PyO3 wheel + napi npm)](/guide/shapes/polyglot-rust) — one Rust core, three artifacts (crates.io, PyPI via `maturin`, npm via `napi-rs`).
+
+More shapes will live under [Library shapes](/guide/shapes/) as they're written.
 
 ## Install
 
