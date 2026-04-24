@@ -207,8 +207,13 @@ describe('pypi.writeVersion', () => {
     // File is untouched -- no literal version line was synthesised.
     expect(readFileSync(p, 'utf8')).toBe(src);
     expect(infoSpy).toHaveBeenCalledTimes(1);
-    expect(infoSpy.mock.calls[0]![0]).toMatch(/skipping.*version rewrite/i);
-    expect(infoSpy.mock.calls[0]![0]).toMatch(/dynamic/i);
+    const msg = infoSpy.mock.calls[0]![0] as string;
+    expect(msg).toMatch(/dynamic version/i);
+    expect(msg).toMatch(/skipping pyproject\.toml rewrite/i);
+    // Actionable guidance (#207): tells the reader which env var to set.
+    expect(msg).toContain('SETUPTOOLS_SCM_PRETEND_VERSION_FOR_DEMO');
+    expect(msg).toContain('0.2.0');
+    expect(msg).toContain('dynamic-versions');
   });
 
   it('skips the rewrite when "version" is one of several entries in dynamic', async () => {
