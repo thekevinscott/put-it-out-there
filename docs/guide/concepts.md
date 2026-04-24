@@ -89,7 +89,7 @@ release: minor
 Or scope it to specific packages:
 
 ```
-release: major [dirsql-rust, dirsql-cli]
+release: major [my-crate, my-cli]
 ```
 
 See [trailer guide](/guide/trailer) for the full grammar.

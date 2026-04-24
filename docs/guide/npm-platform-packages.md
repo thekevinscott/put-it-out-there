@@ -19,9 +19,9 @@ requires them optionally and picks the right one at load time.
 
 ```toml
 [[package]]
-name = "dirsql-napi"
+name = "my-napi"
 kind = "npm"
-npm  = "dirsql"                           # published as @scope/dirsql
+npm  = "my-lib"                           # published as @scope/my-lib
 build = "napi"
 targets = [
   "x86_64-unknown-linux-gnu",
@@ -37,13 +37,13 @@ paths = ["packages/ts/**"]
 At publish time piot:
 
 1. **Synthesizes a per-platform package for every target.** Each
-   sub-package is named `{name}-{target}` (here: `dirsql-napi-x86_64-unknown-linux-gnu`,
+   sub-package is named `{name}-{target}` (here: `my-napi-x86_64-unknown-linux-gnu`,
    etc.). Its `package.json` narrows `os` and `cpu` so npm refuses to
    install it on the wrong platform:
 
    ```json
    {
-     "name": "dirsql-napi-aarch64-apple-darwin",
+     "name": "my-napi-aarch64-apple-darwin",
      "version": "1.2.3",
      "os": ["darwin"],
      "cpu": ["arm64"],
@@ -65,14 +65,14 @@ At publish time piot:
 
    ```json
    {
-     "name": "dirsql",
+     "name": "my-lib",
      "version": "1.2.3",
      "optionalDependencies": {
-       "dirsql-napi-x86_64-unknown-linux-gnu":   "1.2.3",
-       "dirsql-napi-aarch64-unknown-linux-gnu":  "1.2.3",
-       "dirsql-napi-x86_64-apple-darwin":        "1.2.3",
-       "dirsql-napi-aarch64-apple-darwin":       "1.2.3",
-       "dirsql-napi-x86_64-pc-windows-msvc":     "1.2.3"
+       "my-napi-x86_64-unknown-linux-gnu":   "1.2.3",
+       "my-napi-aarch64-unknown-linux-gnu":  "1.2.3",
+       "my-napi-x86_64-apple-darwin":        "1.2.3",
+       "my-napi-aarch64-apple-darwin":       "1.2.3",
+       "my-napi-x86_64-pc-windows-msvc":     "1.2.3"
      }
    }
    ```
@@ -81,7 +81,7 @@ At publish time piot:
    publish failed in step 2, the top-level never ships and users
    don't see a half-populated family.
 
-At `npm install dirsql`, npm's `optionalDependencies` resolution
+At `npm install my-lib`, npm's `optionalDependencies` resolution
 picks exactly one sub-package matching the user's `os` + `cpu` +
 `libc` and skips the rest.
 
@@ -97,9 +97,9 @@ The config is identical to napi except for the `build` value:
 
 ```toml
 [[package]]
-name = "dirsql-cli"
+name = "my-cli"
 kind = "npm"
-npm  = "dirsql-cli"
+npm  = "my-cli"
 build = "bundled-cli"
 targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin", ...]
 path = "packages/ts-cli"

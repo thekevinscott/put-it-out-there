@@ -15,7 +15,18 @@
 
 export type Cadence = 'immediate' | 'scheduled';
 
-export const TOML_SKELETON = `# Put It Out There — release orchestration config.
+/**
+ * Seed values `tomlSkeleton` can bake into the emitted skeleton.
+ * Today, the only one is a suggested `tag_format` for repos whose
+ * existing tag history is `v*` — see `src/init.ts#detectTagFormatSuggestion`.
+ */
+export interface SkeletonSeeds {
+  tag_format?: string;
+  /** Human-readable phrase explaining why the suggestion was made. */
+  tag_format_reason?: string;
+}
+
+const TOML_SKELETON_BODY = `# Put It Out There — release orchestration config.
 # Docs: https://github.com/thekevinscott/put-it-out-there
 
 [putitoutthere]
@@ -29,6 +40,9 @@ version = 1
 # path = "crates/my-crate"                 # dir containing Cargo.toml
 # paths = ["crates/my-crate/**", "Cargo.toml", "Cargo.lock"]
 # first_version = "0.1.0"
+# # tag_format defaults to "{name}-v{version}". Single-package repos
+# # often want "v{version}" to keep the existing v0.1.0-style timeline.
+# # tag_format = "v{version}"
 #
 # [[package]]
 # name = "my-py"
@@ -44,6 +58,31 @@ version = 1
 # paths = ["packages/my-pkg/**"]
 # first_version = "0.1.0"
 `;
+
+/**
+ * Emit the `putitoutthere.toml` skeleton. When `seeds.tag_format` is
+ * set, prepend a short comment explaining why plus a commented
+ * `# tag_format = "..."` hint inside the crates example block.
+ *
+ * Kept as a function (not a constant) so init can bake in
+ * per-repo detection results (#204). Callers without seeds get the
+ * plain skeleton.
+ */
+export function tomlSkeleton(seeds: SkeletonSeeds | null = null): string {
+  if (seeds === null || seeds.tag_format === undefined) {
+    return TOML_SKELETON_BODY;
+  }
+  const reason = seeds.tag_format_reason ?? 'single-package repo';
+  const banner =
+    `# piot init detected ${reason}; set tag_format = "${seeds.tag_format}" on\n` +
+    `# each [[package]] block below to keep that timeline, or remove this comment\n` +
+    `# to use the default "{name}-v{version}".\n` +
+    `# See https://thekevinscott.github.io/put-it-out-there/guide/configuration\n\n`;
+  return banner + TOML_SKELETON_BODY;
+}
+
+/** @deprecated use {@link tomlSkeleton}; kept for external consumers of the constant. */
+export const TOML_SKELETON = TOML_SKELETON_BODY;
 
 export const AGENTS_MD = `# Release signaling for Put It Out There
 
@@ -67,7 +106,7 @@ in the squashed commit body.
 
 To release a subset of packages in a polyglot repo, append a bracketed list:
 
-    release: minor [dirsql-rust, dirsql-python]
+    release: minor [my-crate, my-py]
 
 Packages named in the list are bumped with the specified version. Other
 packages cascaded by path filters still get a \`patch\`. Packages in the
@@ -114,7 +153,7 @@ const BUILD_JOB = `  build:
         if: matrix.kind == 'npm'
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
       - name: Build npm package
         if: matrix.kind == 'npm'
         run: |
@@ -141,6 +180,21 @@ const PUBLISH_JOB = `  publish:
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+      # PyPI publish shells out to \`twine\`. Hosted runners don't ship it;
+      # install it here so the publish job has twine on PATH regardless of
+      # whether the config has a pypi package today.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install twine
+        run: pip install twine
+      # piot cuts an annotated tag per publish (\`git tag -a\`). Hosted
+      # runners have no committer identity set; configure one before the
+      # piot step or tag creation fails with "Please tell me who you are."
+      - name: Configure git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - uses: actions/download-artifact@v4
         with:
           path: artifacts

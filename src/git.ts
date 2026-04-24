@@ -37,6 +37,29 @@ function run(args: string[], opts: GitOptions = {}): string {
     /* v8 ignore start -- defensive: execFileSync always throws Error with .stderr */
     const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
     const base = err instanceof Error ? err.message : String(err);
+    // `git tag -a` on a runner with no user.name/email surfaces as
+    // "Please tell me who you are" / "unable to auto-detect email
+    // address". Give the adopter an actionable hint instead of the
+    // bare git output. #206.
+    const needsIdentity =
+      stderr !== undefined &&
+      /unable to auto-detect email address|Please tell me who you are/.test(stderr);
+    if (needsIdentity) {
+      throw new Error(
+        [
+          `git ${args[0] ?? ''}: no committer identity configured.`,
+          'piot cuts annotated tags which require `user.name` + `user.email`.',
+          'Configure them in the publish job before invoking piot:',
+          '  - run: |',
+          '      git config --global user.name "github-actions[bot]"',
+          '      git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"',
+          'See https://thekevinscott.github.io/put-it-out-there/guide/runner-prerequisites',
+          '',
+          `Underlying git output:\n${stderr}`,
+        ].join('\n'),
+        { cause: err },
+      );
+    }
     throw new Error(stderr ? `${base}\n${stderr}` : base, { cause: err });
     /* v8 ignore stop */
   }

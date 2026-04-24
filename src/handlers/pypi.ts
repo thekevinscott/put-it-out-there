@@ -88,10 +88,20 @@ function writeVersionImpl(
   // and no literal version line to rewrite. The build backend derives the
   // version itself. Per design-commitment #1 (no version computation),
   // skip the rewrite -- the consumer's build system handles propagation.
+  // Surface an actionable guidance line so adopters aren't left guessing
+  // how the planned version reaches the build backend. See #207.
   if (projectDynamicIncludesVersion(project)) {
     const who = pkg.name ? `pypi: ${pkg.name}` : 'pypi';
+    const envSuffix = pkg.name ? scmEnvSuffix(pkg.name) : '<PKG>';
     ctx.log.info(
-      `${who}: skipping pyproject.toml version rewrite; [project].dynamic includes "version" (build backend derives it)`,
+      [
+        `${who}: detected dynamic version; skipping pyproject.toml rewrite.`,
+        `  Planned version: ${version}. Pass it to the build backend via one of:`,
+        `    - SETUPTOOLS_SCM_PRETEND_VERSION_FOR_${envSuffix}=${version}  (hatch-vcs / setuptools-scm)`,
+        `    - Update [package].version in Cargo.toml                ${' '.repeat(Math.max(0, envSuffix.length - 12))}  (maturin reading Cargo)`,
+        `  Set the env var on the build job, before \`python -m build\` / \`maturin build\` runs.`,
+        `  See https://thekevinscott.github.io/put-it-out-there/guide/dynamic-versions`,
+      ].join('\n'),
     );
     return Promise.resolve([]);
   }
@@ -161,6 +171,23 @@ async function publishImpl(
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {
+    // ENOENT = twine not on PATH. The scaffolded publish job is supposed
+    // to install it (setup-python + pip install twine), but an adopter
+    // running an older template or a hand-rolled workflow will hit this.
+    // Give them an actionable message instead of a cryptic ENOENT. #205.
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(
+        [
+          'pypi: twine not found on PATH (ENOENT).',
+          'The publish job must install it before invoking piot. Add:',
+          '  - uses: actions/setup-python@v5',
+          "    with: { python-version: '3.12' }",
+          '  - run: pip install twine',
+          'See https://thekevinscott.github.io/put-it-out-there/guide/runner-prerequisites',
+        ].join('\n'),
+        { cause: err },
+      );
+    }
     const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
     const base = err instanceof Error ? err.message : String(err);
     throw new Error(`twine upload failed${stderr ? `:\n${stderr}` : `: ${base}`}`, { cause: err });
@@ -252,6 +279,15 @@ export function replacePyProjectVersion(source: string, version: string): string
 function projectDynamicIncludesVersion(project: { dynamic?: unknown }): boolean {
   const { dynamic } = project;
   return Array.isArray(dynamic) && dynamic.includes('version');
+}
+
+/**
+ * `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<SUFFIX>` name suffix derived from
+ * a package name per PEP 503's canonical normalisation. Uppercase,
+ * dashes + dots + underscores all collapse to a single underscore.
+ */
+export function scmEnvSuffix(pkgName: string): string {
+  return pkgName.replace(/[-._]+/g, '_').toUpperCase();
 }
 
 /**

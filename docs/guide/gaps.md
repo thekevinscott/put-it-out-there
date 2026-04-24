@@ -96,7 +96,7 @@ the closed issues.
 ### Per-package tags, not a single shared version
 
 A piot release tags each package independently as `{name}-v{version}`
-(e.g. `dirsql-rust-v0.3.1`, `dirsql-py-v0.3.1`). Consumers coming
+(e.g. `my-crate-v0.3.1`, `my-py-v0.3.1`). Consumers coming
 from a single-tag `v0.3.1` layout will see two changes:
 
 - Any install script or doc that parses `v*` tags needs updating.
@@ -119,11 +119,11 @@ for the full flow.
 ### Combined CLI + napi under one top-level package
 
 Each `[[package]]` picks one `build` mode. piot cannot publish a
-single `dirsql` top-level whose `optionalDependencies` mix both
-`@dirsql/cli-<slug>` (CLI binaries via `bundled-cli`) and
-`@dirsql/lib-<slug>` (napi addons via `napi`). If you need that
-shape, split into two published names (e.g. `dirsql` for the napi
-library, `dirsql-cli` for the CLI).
+single `my-lib` top-level whose `optionalDependencies` mix both
+`@myorg/cli-<slug>` (CLI binaries via `bundled-cli`) and
+`@myorg/lib-<slug>` (napi addons via `napi`). If you need that
+shape, split into two published names (e.g. `my-lib` for the napi
+library, `my-lib-cli` for the CLI).
 
 ### `doctor`'s trust-policy check is opt-in and scoped
 

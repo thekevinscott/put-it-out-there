@@ -81,15 +81,15 @@ To catch this before release, declare the expected values in `putitoutthere.toml
 
 ```toml
 [[package]]
-name = "dirsql"
+name = "my-crate"
 kind = "crates"
-path = "crates/dirsql"
-paths = ["crates/dirsql/**"]
+path = "crates/my-crate"
+paths = ["crates/my-crate/**"]
 
 [package.trust_policy]
 workflow    = "release.yml"              # required; bare filename, not a path
 environment = "release"                  # optional
-repository  = "thekevinscott/dirsql"     # optional; owner/repo
+repository  = "my-org/my-crate"          # optional; owner/repo
 ```
 
 `doctor` then runs two additional phases after the local-structure phase:

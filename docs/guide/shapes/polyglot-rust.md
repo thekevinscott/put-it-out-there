@@ -1,4 +1,4 @@
-# Polyglot Rust library (dirsql shape)
+# Polyglot Rust library
 
 This page is for libraries that publish **three artifacts from one
 Rust core**:
@@ -36,7 +36,7 @@ workflow's.
 ## Configuration shape
 
 Three `[[package]]` entries, one per artifact. The Python and npm
-packages declare `depends_on = ["the-rust-crate"]` so a change to the
+packages declare `depends_on = ["my-crate"]` so a change to the
 Rust core cascades all three:
 
 ```toml
@@ -44,14 +44,14 @@ Rust core cascades all three:
 version = 1
 
 [[package]]
-name = "dirsql-rust"
+name = "my-crate"
 kind = "crates"
 path = "packages/rust"
 paths = ["packages/rust/**", "Cargo.toml", "Cargo.lock"]
 features = ["cli"]                         # cargo publish --features cli
 
 [[package]]
-name = "dirsql-py"
+name = "my-py"
 kind = "pypi"
 build = "maturin"
 path = "packages/python"
@@ -63,12 +63,12 @@ targets = [
   "aarch64-apple-darwin",
   "x86_64-pc-windows-msvc",
 ]
-depends_on = ["dirsql-rust"]
+depends_on = ["my-crate"]
 
 [[package]]
-name = "dirsql-napi"
+name = "my-napi"
 kind = "npm"
-npm  = "dirsql"                            # published as @scope/dirsql
+npm  = "my-lib"                            # published as @scope/my-lib
 build = "napi"
 path = "packages/ts"
 paths = ["packages/ts/**"]
@@ -79,7 +79,7 @@ targets = [
   "aarch64-apple-darwin",
   "x86_64-pc-windows-msvc",
 ]
-depends_on = ["dirsql-rust"]
+depends_on = ["my-crate"]
 ```
 
 ## Workflow shape
@@ -135,6 +135,23 @@ The emitted matrix rows carry a `runner` field the workflow reads
 as `runs-on` (see the build job above, or let the scaffolded
 `release.yml` wire it for you).
 
+## Publish job prerequisites
+
+The scaffolded `publish` job checks out the repo, installs Node, and
+invokes the piot action. For this shape, **it also needs**:
+
+- **Python + twine on PATH.** The PyPI handler shells out to
+  `twine upload`. Add `actions/setup-python@v5` and `pip install twine`
+  before the piot step. See [runner prerequisites](/guide/runner-prerequisites).
+- **A git committer identity.** piot cuts an annotated tag per
+  package. On hosted runners, `user.name` / `user.email` are unset;
+  configure `github-actions[bot]` before the piot step.
+- **`SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<PKG>`** when any PyPI package
+  uses dynamic versioning (hatch-vcs / setuptools-scm). Maturin reads
+  the version from `Cargo.toml`, so a maturin-only shape typically
+  doesn't need this — but a mixed shape often does. See
+  [dynamic versions](/guide/dynamic-versions).
+
 ## One-time prerequisites before your first release
 
 1. Register the trusted publisher on each of crates.io, PyPI, npm.
@@ -157,7 +174,7 @@ as `runs-on` (see the build job above, or let the scaffolded
   for this yet; the staging step stays in your `build` job, and the
   wheel is what piot publishes.
 - **Two tag schemes.** piot tags each package independently as
-  `{name}-v{version}` (e.g. `dirsql-rust-v0.3.1`, `dirsql-py-v0.3.1`).
+  `{name}-v{version}` (e.g. `my-crate-v0.3.1`, `my-py-v0.3.1`).
   If your existing setup used a single shared `v0.3.1` tag across
   all three, consumers reading tags (install scripts, docs, release
   pages) need to update.
@@ -167,14 +184,19 @@ as `runs-on` (see the build job above, or let the scaffolded
   before anything ships so partial-publish is rare, and when it
   happens the right move is to bump-and-republish rather than try
   to unpublish.
-- **Dynamic versions in `pyproject.toml`** (hatch-vcs,
-  setuptools-scm) interact with piot's version rewrite in ways that
-  aren't fully settled yet — track via
-  [#171](https://github.com/thekevinscott/put-it-out-there/issues/171).
+- **Dynamic versions in `pyproject.toml`.** If any PyPI package uses
+  `[project].dynamic = ["version"]` with hatch-vcs / setuptools-scm,
+  piot skips the pyproject rewrite and the build backend derives the
+  version from git. Without the env-var handoff, the sdist ends up
+  named `<pkg>-X.Y.Z.dev<N>.tar.gz` instead of `<pkg>-X.Y.Z.tar.gz`.
+  See [dynamic versions](/guide/dynamic-versions).
 
 ## Further reading
 
 - [Concepts](/guide/concepts) — plan/build/publish, cascade, idempotency.
 - [npm platform packages](/guide/npm-platform-packages) — the family pattern in detail.
 - [Authentication](/guide/auth) — trusted publisher setup.
+- [Runner prerequisites](/guide/runner-prerequisites) — twine, git identity, and other non-obvious runner needs.
+- [Dynamic versions](/guide/dynamic-versions) — the env-var handoff for `hatch-vcs` / `setuptools-scm`.
 - [Configuration reference](/guide/configuration).
+- [Single-package Python library](/guide/shapes/python-library) — the simpler shape if you don't need Rust or napi.
