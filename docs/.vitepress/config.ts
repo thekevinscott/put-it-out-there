@@ -38,6 +38,7 @@ export default defineConfig({
             { text: 'Nightly release', link: '/guide/nightly-release' },
             { text: 'Cascade', link: '/guide/cascade' },
             { text: 'npm platform packages', link: '/guide/npm-platform-packages' },
+            { text: 'Custom build workflows', link: '/guide/custom-build-workflows' },
             { text: 'Runner prerequisites', link: '/guide/runner-prerequisites' },
             { text: 'Dynamic versions', link: '/guide/dynamic-versions' },
             { text: 'Known gaps', link: '/guide/gaps' },

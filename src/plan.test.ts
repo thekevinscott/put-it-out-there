@@ -601,3 +601,59 @@ describe('plan: merge-commit trailer resolution', () => {
     expect(rust?.version).toBe('0.1.1');
   });
 });
+
+describe('plan: build_workflow passthrough (#216)', () => {
+  it('stamps build_workflow on every row for packages that declare one', async () => {
+    writeFileSync(
+      join(repo, 'putitoutthere.toml'),
+      `
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "lib-rust"
+kind  = "crates"
+path  = "packages/rust"
+paths = ["packages/rust/**"]
+
+[[package]]
+name       = "lib-python"
+kind       = "pypi"
+path       = "packages/python"
+build      = "maturin"
+targets    = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
+paths      = ["packages/python/**"]
+build_workflow = "publish-python.yml"
+`,
+      'utf8',
+    );
+    commit('seed', { 'packages/rust/Cargo.toml': 'x', 'packages/python/pyproject.toml': 'y' });
+
+    const matrix = await plan({ cwd: repo });
+
+    // Rust package has no build_workflow — row should NOT carry one.
+    const rustRows = matrix.filter((r) => r.name === 'lib-rust');
+    expect(rustRows.length).toBeGreaterThan(0);
+    for (const r of rustRows) {
+      expect(r.build_workflow).toBeUndefined();
+    }
+
+    // Python package declares build_workflow — every one of its rows
+    // (two wheel targets + one sdist) carries it.
+    const pyRows = matrix.filter((r) => r.name === 'lib-python');
+    expect(pyRows.length).toBeGreaterThanOrEqual(2);
+    for (const r of pyRows) {
+      expect(r.build_workflow).toBe('publish-python.yml');
+    }
+  });
+
+  it('omits build_workflow entirely when the package does not declare one', async () => {
+    writeFileSync(join(repo, 'putitoutthere.toml'), PUTITOUTTHERE_TOML);
+    commit('seed', { 'packages/rust/Cargo.toml': 'x' });
+
+    const matrix = await plan({ cwd: repo });
+    for (const r of matrix) {
+      expect(r.build_workflow).toBeUndefined();
+    }
+  });
+});
