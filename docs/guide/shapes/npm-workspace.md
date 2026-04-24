@@ -132,9 +132,9 @@ publish:
         command: publish
 ```
 
-`pnpm --filter ${{ matrix.name }} build` runs only the planned
-package's build, not the whole workspace — important when only
-one package needs to ship.
+The `pnpm --filter <name>` step in the build job runs only the
+planned package's build, not the whole workspace — important
+when only one package needs to ship.
 
 ## One-time prerequisites before your first release
 
