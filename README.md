@@ -50,10 +50,13 @@ fix: handle empty token lists
 release: patch
 ```
 
-Valid bumps: `patch`, `minor`, `major`, `skip`. On push to `main`, the
-`release.yml` workflow runs `putitoutthere plan` against the trailer +
-changed paths, then `putitoutthere publish` per matching package. Tags are
-`{name}-v{version}`.
+Valid bumps: `patch`, `minor`, `major`, `skip`. The trailer decides *which
+bump*; the workflow's `on:` block (push, schedule, `workflow_dispatch`)
+decides *when* to ship. The scaffolded `release.yml` runs on push to `main`
+and invokes `putitoutthere plan` against the trailer + changed paths, then
+`putitoutthere publish` per matching package. Tags are `{name}-v{version}`
+by default — set `tag_format = "v{version}"` in `putitoutthere.toml` for
+single-package repos.
 
 The trailer is optional. By default, any package whose `paths` matched
 changed files cascades at `patch`. Use `release: minor` / `release: major`
