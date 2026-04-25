@@ -646,7 +646,7 @@ describe('pypi.publish', () => {
       .flatMap((c) => (Array.isArray(c[1]) ? (c[1] as readonly unknown[]) : []))
       .find((a): a is string => typeof a === 'string' && a.endsWith('demo-0.1.0.tar.gz'));
     expect(tarballArg).toBeDefined();
-    expect(tarballArg).toContain('packages/python/dist');
+    expect(tarballArg).toContain(join('packages', 'python', 'dist'));
     fetchSpy.mockRestore();
   });
 });
