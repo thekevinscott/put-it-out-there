@@ -4,6 +4,15 @@ This file is the primary instruction set for any LLM (Claude, Codex, Cursor,
 etc.) working in this repo. `CLAUDE.md` exists as a Claude-specific entry
 point that `@`-includes this file, so edit here — not there.
 
+## Operating environment
+
+If `CLAUDE_CODE_REMOTE=true` is set in the environment, you are running in
+a remote/managed-agent context (Claude Code on the web, a cloud session,
+or the Claude Code GitHub Action). Read
+[`notes/environments/remote.md`](notes/environments/remote.md) **before
+doing anything else** — it specifies how work must be tracked and landed
+when no live operator is watching the session.
+
 ## Where to put what
 
 - **`docs/`** — public-facing documentation. Rendered by VitePress and published to GitHub Pages. Anything here is read by users of `putitoutthere`. See [`docs/AGENTS.md`](docs/AGENTS.md) for authoring rules.
