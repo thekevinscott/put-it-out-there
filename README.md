@@ -141,6 +141,10 @@ Preferred over long-lived tokens. One-time setup per registry:
 - **PyPI:** [pending publisher](https://docs.pypi.org/trusted-publishers/) — register the project name pointing at this repo's `release.yml`.
 - **crates.io:** [OIDC via `rust-lang/crates-io-auth-action@v1`](https://github.com/rust-lang/crates-io-auth-action) — the crate needs one manual bootstrap publish first.
 
+PyPI and crates.io pin the workflow filename in their trust policy —
+renaming `release.yml` after registration requires updating the policy
+on each. npm provenance does not pin filenames; renames are free.
+
 Token fallbacks (`NPM_TOKEN`, `PYPI_API_TOKEN`, `CARGO_REGISTRY_TOKEN`) are
 still read as env vars if OIDC isn't available. `putitoutthere doctor`
 reports which path is active.
@@ -154,6 +158,12 @@ reports which path is active.
   *cascading releases*, not runtime version pinning.
 - Not a build system. Handlers shell out to `cargo`, `uv`/`maturin`/`hatch`,
   `npm` — standard toolchains only.
+- Not a build-step runner. Pre-publish work that produces artifacts
+  (cross-compiling a CLI to bundle into wheels, building napi addons,
+  staging binaries into a package directory) lives in your `release.yml`
+  between `plan` and `publish` — not as a hook in `putitoutthere.toml`.
+  The scaffolded workflow shows the pattern. See [custom build
+  workflows](./docs/guide/custom-build-workflows.md).
 
 ## Docs
 

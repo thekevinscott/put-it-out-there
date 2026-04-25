@@ -93,10 +93,12 @@ putitoutthere auth status  [--json]
   [Authentication](/guide/auth)) and has to be verified against each
   registry's settings UI.
 - That the **caller workflow filename matches the registered trust
-  policy.** crates.io and npm pin the filename in the OIDC JWT; piot
+  policy.** PyPI and crates.io pin the filename in the OIDC JWT; piot
   does not introspect the registered policy to confirm your
   `release.yml` matches. A mismatch fails at publish with an HTTP 400;
   the fix is to re-register the policy (or rename the file) and retry.
+  npm provenance does not pin a workflow filename, so renames are free
+  on the npm side.
 - That a specific **target triple is buildable on the runner your
   workflow selected.** Build-matrix correctness lives in your workflow
   YAML, not in `putitoutthere.toml`.
