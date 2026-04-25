@@ -42,6 +42,18 @@ describe('cli', () => {
     expect(stderrChunks.join('')).toMatch(/Usage: putitoutthere/);
   });
 
+  it('--help description for --json is not stale (#231)', async () => {
+    // Regression guard: the usage line for --json once read "(plan only)",
+    // but the flag has been accepted on every command that emits a result
+    // since their respective additions. Lock the corrected wording in so
+    // a future edit can't quietly reintroduce the bug.
+    const code = await run(['node', 'putitoutthere', '--help']);
+    expect(code).toBe(0);
+    const usage = stderrChunks.join('');
+    expect(usage).toMatch(/--json\s+emit machine-readable output/);
+    expect(usage).not.toMatch(/--json[^\n]*plan only/);
+  });
+
   it('prints version from package.json', async () => {
     const code = await run(['node', 'putitoutthere', 'version']);
     expect(code).toBe(0);
