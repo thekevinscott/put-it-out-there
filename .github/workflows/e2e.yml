@@ -33,6 +33,13 @@ concurrency:
 jobs:
   e2e:
     name: e2e (${{ matrix.fixture }})
+    # Permissions on a reusable-workflow call set the GITHUB_TOKEN scope
+    # for the called workflow. e2e-fixture.yml's publish job needs
+    # id-token: write (OIDC mint) and contents: write (tag push); both
+    # have to be granted here at the caller level.
+    permissions:
+      contents: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
