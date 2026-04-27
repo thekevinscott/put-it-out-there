@@ -1,7 +1,7 @@
 # Plan gaps surfaced by migration audits
 
 Findings from the per-repo migration audits. This table is read alongside
-[`notes/design-commitments.md`](../notes/design-commitments.md), which is the
+[`notes/design-commitments.md`](../design-commitments.md), which is the
 normative reference for what is and isn't in scope. Rows marked **Out of
 scope** are intentional non-goals, not missing features — they are recorded
 here so the decision trail stays visible to anyone comparing putitoutthere

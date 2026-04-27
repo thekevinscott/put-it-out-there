@@ -61,7 +61,7 @@ are prefixed `**BREAKING**` and link to the matching section in
   `artifact_name` verbatim and need no changes; consumers running
   the `cachetta#26` encode/decode workaround should remove it once
   they upgrade. See [MIGRATIONS.md](./MIGRATIONS.md#package-names-with--no-longer-need-an-encode-decode-workaround) and
-  [Artifact contract → notes](./docs/guide/artifact-contract.md#naming-convention-reference).
+  [Artifact contract → notes](./notes/internals/artifact-contract.md#naming-convention-reference).
 - **Documentation accuracy pass** (#231). A docs-vs-code audit caught
   several places where reference material lagged behind shipped behavior.
   No code paths changed beyond a stale help-text line; existing configs

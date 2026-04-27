@@ -196,12 +196,3 @@ Walk it back through the flow:
    the directory referenced by `matrix.artifact_path` immediately
    before the upload step to confirm the build wrote what you think
    it did.
-
-## Related
-
-- [Troubleshooting publish failures](/guide/troubleshooting) — the
-  full error-string → fix index.
-- [npm platform packages](/guide/npm-platform-packages) — the per-
-  target + top-level slot grammar for napi / bundled-cli.
-- [Library shapes](/guide/shapes/) — every shape page shows the
-  upload step in context.
