@@ -156,6 +156,16 @@ describe('#31 polyglot fixtures', () => {
     expect(names).toContain('piot-fixture-zzz-cli');
   });
 
+  it('js-python-no-rust → 1 pypi sdist + 1 npm noarch', async () => {
+    const cwd = prepareFixture('js-python-no-rust');
+    const rows = await plan({ cwd });
+    expect(rows).toHaveLength(2);
+    const byKind = new Map<string, number>();
+    for (const r of rows) byKind.set(r.kind, (byKind.get(r.kind) ?? 0) + 1);
+    expect(byKind.get('pypi')).toBe(1);
+    expect(byKind.get('npm')).toBe(1);
+  });
+
   it('polyglot-everything → rust + python (5+sdist) + npm (5+main)', async () => {
     const cwd = prepareFixture('polyglot-everything');
     const rows = await plan({ cwd });
