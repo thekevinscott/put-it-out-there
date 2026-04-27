@@ -281,3 +281,9 @@ jobs:
         with:
           command: publish
           working_directory: fixture-tree
+        env:
+          # npm trusted-publisher coverage for unscoped names is per-package;
+          # the fixture set has 18 distinct platform names. Fall back to a
+          # long-lived token for e2e — the consumer-facing reusable workflow
+          # remains OIDC-only.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
