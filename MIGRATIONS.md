@@ -21,6 +21,32 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Reusable workflow's maturin sdist row uses `command: sdist`
+
+**Summary.** The reusable workflow's pypi-maturin build step was a single
+`PyO3/maturin-action@v1` invocation with `command: build` and an
+`--sdist` flag conditional on the row being the sdist target. `maturin
+build --sdist` is documented as "build a wheel AND an sdist" — the
+sdist's artifact directory ended up containing both a `.tar.gz` and a
+manylinux wheel, which collided at upload time with the per-target
+wheel rows and aborted twine with `400 File already exists`. The build
+step is now split into two: `command: sdist` for the sdist row
+(sdist-only) and `command: build` with `--target` for wheel rows.
+
+**Required changes.** None.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Maturin packages with a
+`sdist` row in their plan now upload a single `.tar.gz` from that row,
+not a wheel-plus-sdist pair. Per-target wheel rows are unaffected.
+
+**Verification.** A maturin-built package with `sdist` in `targets`
+publishes to PyPI without `400 File already exists`. The sdist
+artifact directory contains `.tar.gz` only.
+
+---
+
 ### Synthesized npm platform packages inherit `repository`/`license`/`homepage`
 
 **Summary.** npm's provenance verifier rejected platform-package tarballs

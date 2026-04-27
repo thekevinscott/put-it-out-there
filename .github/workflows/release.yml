@@ -91,15 +91,24 @@ jobs:
         with:
           python-version: ${{ inputs.python_version }}
 
-      - if: matrix.kind == 'pypi' && matrix.build == 'maturin'
+      # Two invocations: `maturin build --sdist` produces wheel AND sdist
+      # (the flag is "also build sdist", not "only build sdist"), so the
+      # sdist row would emit a wheel artifact that collides with the
+      # per-target wheel rows at upload time. Use `command: sdist` for
+      # the sdist row, which produces sdist-only.
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target == 'sdist'
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ${{ matrix.path }}
+          command: sdist
+          args: --out dist
+
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target != 'sdist'
         uses: PyO3/maturin-action@v1
         with:
           working-directory: ${{ matrix.path }}
           command: build
-          args: >-
-            --release
-            --out dist
-            ${{ matrix.target == 'sdist' && '--sdist' || format('--target {0}', matrix.target) }}
+          args: --release --out dist --target ${{ matrix.target }}
 
       - if: matrix.kind == 'pypi' && matrix.build != 'maturin' && matrix.target == 'sdist'
         # hatch-vcs / setuptools-scm derive the version from the latest git

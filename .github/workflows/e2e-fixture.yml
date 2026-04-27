@@ -148,15 +148,21 @@ jobs:
         with:
           python-version: '3.12'
 
-      - if: matrix.kind == 'pypi' && matrix.build == 'maturin'
+      # Mirrors release.yml: `maturin build --sdist` produces wheel +
+      # sdist; use `command: sdist` for sdist-only.
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target == 'sdist'
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: fixture-tree/${{ matrix.path }}
+          command: sdist
+          args: --out dist
+
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target != 'sdist'
         uses: PyO3/maturin-action@v1
         with:
           working-directory: fixture-tree/${{ matrix.path }}
           command: build
-          args: >-
-            --release
-            --out dist
-            ${{ matrix.target == 'sdist' && '--sdist' || format('--target {0}', matrix.target) }}
+          args: --release --out dist --target ${{ matrix.target }}
 
       - if: matrix.kind == 'pypi' && matrix.build != 'maturin' && matrix.target == 'sdist'
         working-directory: fixture-tree/${{ matrix.path }}

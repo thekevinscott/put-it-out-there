@@ -45,6 +45,13 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Fixed
 
+- **Reusable workflow's maturin sdist row now uses `command: sdist`.** (#244)
+  `maturin build --sdist` builds a wheel AND an sdist; the sdist row's
+  artifact tarball ended up containing a manylinux wheel that collided
+  with the per-target wheel rows at upload time, causing twine to abort
+  with `400 File already exists`. Splitting the sdist invocation to use
+  `command: sdist` (sdist-only) eliminates the collision.
+
 - **Synthesized npm platform packages now inherit `repository`, `license`, and `homepage` from the main `package.json`.** (#244)
   npm's provenance verifier rejected platform tarballs with `E422 Error verifying sigstore provenance bundle: Failed to validate repository information: package.json: "repository.url" is "", expected to match "https://github.com/<owner>/<repo>"`. The synthesizer used to write only `name`/`version`/`os`/`cpu`/`files`/`main`/`libc`; the empty repository URL didn't match the publishing repo baked into the sigstore bundle. Identity fields are now copied from the main package so per-target tarballs validate. Affects `build = "napi"` and `build = "bundled-cli"` packages.
 
