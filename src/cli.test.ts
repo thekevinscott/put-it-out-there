@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -64,93 +64,6 @@ describe('cli', () => {
     const code = await run(['node', 'putitoutthere', 'foo']);
     expect(code).toBe(1);
     expect(stderrChunks.join('')).toMatch(/unknown command/);
-  });
-
-  it('init scaffolds a fresh repo and exits 0', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cli-init-'));
-    try {
-      const code = await run(['node', 'putitoutthere', 'init', '--cwd', dir]);
-      expect(code).toBe(0);
-      expect(existsSync(join(dir, 'putitoutthere.toml'))).toBe(true);
-      expect(stdoutChunks.join('')).toMatch(/wrote.+putitoutthere\.toml/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('init prints "backed up" and "skipped" lines when appropriate', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cli-init-backed-'));
-    try {
-      writeFileSync(join(dir, 'putitoutthere.toml'), '# user-edited\n');
-      mkdirSync(join(dir, '.github', 'workflows'), { recursive: true });
-      writeFileSync(join(dir, '.github', 'workflows', 'release.yml'), '# existing\n');
-      const code = await run(['node', 'putitoutthere', 'init', '--cwd', dir]);
-      expect(code).toBe(0);
-      const out = stdoutChunks.join('');
-      expect(out).toMatch(/backed up .+release\.yml/);
-      expect(out).toMatch(/skipped.+putitoutthere\.toml/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('init prints "up-to-date" lines for already-present files (#131)', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cli-init-uptodate-'));
-    try {
-      mkdirSync(join(dir, 'putitoutthere'), { recursive: true });
-      writeFileSync(join(dir, 'putitoutthere', 'AGENTS.md'), '# custom\n');
-      writeFileSync(join(dir, 'CLAUDE.md'), '@putitoutthere/AGENTS.md\n');
-      const code = await run(['node', 'putitoutthere', 'init', '--cwd', dir]);
-      expect(code).toBe(0);
-      const out = stdoutChunks.join('');
-      expect(out).toMatch(/up-to-date .+putitoutthere\/AGENTS\.md/);
-      expect(out).toMatch(/up-to-date .+CLAUDE\.md/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('init --cadence=scheduled emits the cron release.yml', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cli-init-sched-'));
-    try {
-      const code = await run([
-        'node', 'putitoutthere', 'init', '--cwd', dir, '--cadence', 'scheduled',
-      ]);
-      expect(code).toBe(0);
-      const y = readFileSync(join(dir, '.github', 'workflows', 'release.yml'), 'utf8');
-      expect(y).toContain("cron: '0 2 * * *'");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('init --force overwrites existing putitoutthere.toml', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cli-init-force-'));
-    try {
-      writeFileSync(join(dir, 'putitoutthere.toml'), '# pre-existing\n');
-      const code = await run(['node', 'putitoutthere', 'init', '--cwd', dir, '--force']);
-      expect(code).toBe(0);
-      expect(stdoutChunks.join('')).toMatch(/wrote.+putitoutthere\.toml/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('init --json emits machine-readable result', async () => {
-    const stdoutChunks: string[] = [];
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      return true;
-    });
-    const dir = mkdtempSync(join(tmpdir(), 'cli-init-json-'));
-    try {
-      const code = await run(['node', 'putitoutthere', 'init', '--cwd', dir, '--json']);
-      expect(code).toBe(0);
-      const r = JSON.parse(stdoutChunks.join('').trim()) as { wrote: string[] };
-      expect(r.wrote).toContain('putitoutthere.toml');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 
   it('runs doctor and exits 1 without config', async () => {

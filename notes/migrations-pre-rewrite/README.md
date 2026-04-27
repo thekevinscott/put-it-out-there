@@ -1,6 +1,6 @@
 # Migration audits
 
-Per-repo audits of thekevinscott's projects that might adopt `putitoutthere`. Each doc follows the [`dirsql.md`](../notes/4-17-2026-initial-plan/migrations/dirsql.md) template:
+Per-repo audits of thekevinscott's projects that might adopt `putitoutthere`. Each doc follows the [`dirsql.md`](../4-17-2026-initial-plan/migrations/dirsql.md) template:
 
 1. TL;DR diff table.
 2. Behavior changes to accept.

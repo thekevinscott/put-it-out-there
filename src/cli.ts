@@ -1,22 +1,18 @@
 /**
- * `putitoutthere` CLI entry. Thin wrapper around the SDK.
- *
- * plan   → src/plan.ts
- * publish → src/publish.ts
- * init   → TODO #20
- * doctor → TODO #23
+ * `putitoutthere` CLI entry. Internal seam — the reusable workflow
+ * (`.github/workflows/release.yml`) invokes this. Not a consumer-
+ * facing surface; flags / help text are stable enough to test, but
+ * not promised externally. See `notes/design-commitments.md`.
  *
  * Global flags:
  *   --cwd <path>      working directory (default: process.cwd())
  *   --config <path>   path to putitoutthere.toml
  *   --dry-run         for publish; no side effects
- *   --json            machine-readable output (supported by most
- *                     commands that emit a result; see docs/api/cli.md)
+ *   --json            machine-readable output
  */
 
 import { login, logout, status, type DevicePrompt, type StatusResult } from './auth.js';
 import { doctor, TRUST_POLICY_SCOPE_NOTE } from './doctor.js';
-import { init } from './init.js';
 import { plan } from './plan.js';
 import { runPreflight } from './preflight-run.js';
 import { publish } from './publish.js';
@@ -29,7 +25,7 @@ import {
 } from './token.js';
 import { VERSION } from './version.js';
 
-const COMMANDS = ['init', 'plan', 'publish', 'doctor', 'preflight', 'token', 'auth', 'version'] as const;
+const COMMANDS = ['plan', 'publish', 'doctor', 'preflight', 'token', 'auth', 'version'] as const;
 type Command = (typeof COMMANDS)[number];
 
 const REGISTRIES = ['crates', 'npm', 'pypi'] as const satisfies readonly Registry[];
@@ -47,13 +43,12 @@ function printUsage(): void {
       'Usage: putitoutthere <command> [options]',
       '',
       'Commands:',
-      '  init       Scaffold putitoutthere.toml + workflows + AGENTS.md (#20)',
       '  plan       Compute and emit the release plan',
       '  publish    Execute the plan',
-      '  doctor     Validate config + handlers + auth (#23)',
-      '  preflight  Run every pre-publish check without side effects (#93)',
+      '  doctor     Validate config + handlers + auth',
+      '  preflight  Run every pre-publish check without side effects',
       '  token      Inspect or list registry tokens (pypi/npm/crates)',
-      '  auth       Optional: sign in to GitHub for `token list --secrets`',
+      '  auth       Sign in to GitHub for `token list --secrets`',
       '  version    Print CLI version',
       '',
       'Options:',
@@ -61,13 +56,11 @@ function printUsage(): void {
       '  --config <path>   path to putitoutthere.toml',
       '  --dry-run         publish without side effects',
       '  --json            emit machine-readable output (most commands)',
-      '  --force           overwrite putitoutthere.toml on init',
       '  --artifacts       doctor: also check artifact completeness',
       '  --deep            doctor: also inspect each token\'s publish scope',
       '  --preflight-check publish: refuse on token scope mismatch (pypi/npm)',
       '  --all             preflight: include non-cascaded packages too',
       '  --secrets         token list: also list GitHub repo/environment secrets (requires auth login)',
-      '  --cadence <mode>  init: immediate (default) or scheduled',
       '  --token <value>   token inspect: token value (else read from env)',
       '  --registry <r>    token inspect: crates|npm|pypi',
       '',
@@ -82,13 +75,11 @@ interface ParsedFlags {
   config?: string | undefined;
   dryRun: boolean;
   json: boolean;
-  force: boolean;
   artifacts: boolean;
   all: boolean;
   deep: boolean;
   preflightCheck: boolean;
   secrets: boolean;
-  cadence?: 'immediate' | 'scheduled';
   token?: string;
   registry?: Registry;
 }
@@ -98,7 +89,6 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     cwd: process.cwd(),
     dryRun: false,
     json: false,
-    force: false,
     artifacts: false,
     all: false,
     deep: false,
@@ -112,17 +102,12 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     else if (a === '--config') out.config = argv[++i];
     else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--json') out.json = true;
-    else if (a === '--force') out.force = true;
     else if (a === '--artifacts') out.artifacts = true;
     else if (a === '--all') out.all = true;
     else if (a === '--deep') out.deep = true;
     else if (a === '--preflight-check') out.preflightCheck = true;
     else if (a === '--secrets') out.secrets = true;
-    else if (a === '--cadence') {
-      const v = argv[++i];
-      /* v8 ignore next -- invalid cadence is caught by the type system for legit callers */
-      if (v === 'immediate' || v === 'scheduled') out.cadence = v;
-    } else if (a === '--token') {
+    else if (a === '--token') {
       const v = argv[++i];
       if (v !== undefined) out.token = v;
     } else if (a === '--registry') {
@@ -435,23 +420,6 @@ export async function run(argv: readonly string[]): Promise<number> {
             : `putitoutthere auth: unknown subcommand: ${sub}\n`,
         );
         return 1;
-      }
-      case 'init': {
-        const r = init({
-          cwd: flags.cwd,
-          force: flags.force,
-          ...(flags.cadence !== undefined ? { cadence: flags.cadence } : {}),
-        });
-        if (flags.json) {
-          process.stdout.write(JSON.stringify(r) + '\n');
-        } else {
-          for (const f of r.wrote) process.stdout.write(`  wrote        ${f}\n`);
-          for (const f of r.backedUp) process.stdout.write(`  backed up    ${f} -> ${f}.bak\n`);
-          for (const f of r.skipped) process.stdout.write(`  skipped      ${f} (exists; use --force)\n`);
-          for (const f of r.alreadyPresent) process.stdout.write(`  up-to-date   ${f}\n`);
-          for (const n of r.notes) process.stdout.write(`  note         ${n}\n`);
-        }
-        return 0;
       }
       /* v8 ignore next 3 -- exhaustive; 'version' handled above */
       case 'version':

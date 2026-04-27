@@ -1,9 +1,8 @@
 # Runner prerequisites
 
 `putitoutthere` shells out to per-language tools (`twine`, `cargo`,
-`npm`) and to `git`. The scaffolded `release.yml` covers the common
-needs, but depending on your shape, a few runner-level prerequisites
-need wiring before `putitoutthere publish` runs.
+`npm`) and to `git`. Depending on your shape, a few runner-level
+prerequisites need wiring before the publish phase runs.
 
 This page is the single reference for those prerequisites. Every
 shape guide links here rather than repeating the list.
@@ -41,10 +40,9 @@ Python runtime with the Action (enormous) or pulling it at runtime
 installing Python packages — `setup-python` + `pip install`. We use
 that mechanism instead of reinventing it.
 
-The scaffolded `release.yml` emitted by `putitoutthere init`
-**includes** these steps when your config has a `kind = "pypi"`
-package; this page is for readers adapting an existing workflow or
-debugging a failed run.
+The reusable workflow includes these steps when your config has a
+`kind = "pypi"` package; this page is for readers debugging a failed
+run or wiring a custom workflow that calls the engine directly.
 
 ## Git committer identity
 
@@ -114,8 +112,8 @@ One more runner-level prereq, specific to PyPI packages using
 `[project].dynamic = ["version"]`: set
 `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<PKG>` (or the maturin equivalent)
 on the **build** job so the backend uses piot's planned version
-instead of deriving one from git. See
-[dynamic versions](/guide/dynamic-versions).
+instead of deriving one from git. See the dynamic-version PyPI
+gotcha section in `README.md`.
 
 ## Summary checklist
 
@@ -129,12 +127,5 @@ Before cutting your first release, confirm the publish job has:
       version matters).
 - [ ] `actions/download-artifact@v4` with `path: artifacts`.
 - [ ] `permissions: contents: write, id-token: write`.
-- [ ] OIDC trusted publisher registered per registry (see
-      [Authentication](/guide/auth)).
-
-## Related
-
-- [Artifact contract](/guide/artifact-contract) — what the build job
-  must upload and under which names.
-- [Troubleshooting publish failures](/guide/troubleshooting) — error
-  strings keyed to the prereqs above.
+- [ ] OIDC trusted publisher registered per registry (see the
+      Trusted-publishers section of `README.md`).

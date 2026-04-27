@@ -21,6 +21,74 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Public surface collapsed to a reusable workflow
+
+**Summary.** The consumer surface is now one line in a `release.yml`:
+
+```yaml
+on:
+  push: { branches: [main] }
+
+jobs:
+  release:
+    uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1
+    permissions:
+      contents: write
+      id-token: write
+```
+
+Plus the consumer's existing `putitoutthere.toml`. Triggers live in
+the consumer's file; everything below them — pinned action versions,
+plan/build/publish orchestration, runner toolchain setup, artifact
+upload/download, GitHub Release creation — lives in the reusable
+workflow that piot ships. The CLI and the JS action are internal
+seams the reusable workflow invokes; consumers do not call them.
+Auth is OIDC trusted publishers only — long-lived registry tokens
+are not reachable through the workflow. See [design
+commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md)
+for the authoritative non-goals.
+
+**Required changes.**
+
+| Before (hand-written `release.yml`) | After |
+|-----|-----|
+| ~100 lines of YAML: plan/build/publish jobs, twine install, git identity, GitHub Release backfill, hand-pinned action majors | `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1` |
+| `putitoutthere init` to scaffold the workflow | Subcommand removed; consumers add the snippet above by hand |
+| `[[package]].build_workflow = "publish-foo.yml"` for unsupported shapes | Removed. Shapes that don't fit piot's named build modes write their own release workflow that doesn't use piot |
+| Long-lived registry tokens (`NPM_TOKEN`, `PYPI_API_TOKEN`, `CARGO_REGISTRY_TOKEN`) passed to a hand-written publish step | Not reachable through the reusable workflow. Register an OIDC trusted publisher per registry once |
+| Optional inputs `dry_run`, `working_directory`, `config` | Removed. Plan job already prints the matrix without side effects; config lives at `putitoutthere.toml` in the repo root, no override |
+| Documentation site (`docs/`) | Removed. README is the single user-facing surface; `notes/internals/` holds the contracts the reusable workflow honors so consumers don't have to know them |
+
+**Deprecations removed.** `build_workflow:` is no longer in the
+config schema (`src/config.ts`); configs that declare it now fail
+validation. `putitoutthere init`, `--cadence`, and `--force` flags
+are removed from the CLI.
+
+**Behavior changes without code changes.** Engine behavior (plan,
+cascade, version bump, registry handlers, completeness check,
+idempotency, OIDC trust-policy validation) is unchanged. The
+reusable workflow internally pins:
+
+- `actions/checkout@v4` (`fetch-depth: 0`)
+- `actions/setup-node@v4`
+- `actions/setup-python@v5`
+- `actions/upload-artifact@v4`
+- `actions/download-artifact@v4`
+- `PyO3/maturin-action@v1`
+
+If a consumer was running newer majors (e.g. coaxer hit
+`download-artifact@v8` defaults that broke the artifact-naming
+contract), the reusable workflow standardises everyone on the
+known-tested versions.
+
+**Verification.**
+
+- `pnpm test:unit` passes in the main repo.
+- A consumer's first cutover: drop in the 12-line `release.yml`
+  shown above, push a commit that touches a `[[package]].paths`
+  glob, and watch for a tag push + GitHub Release on the next
+  workflow run.
+
 ### Publish path works end-to-end for slash-containing `pkg.name`
 
 **Summary.** Follow-up to the [`/`-encoding fix](#package-names-with--no-longer-need-an-encode-decode-workaround)

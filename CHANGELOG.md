@@ -12,50 +12,15 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Added
 
-- **`[package.bundle_cli]` recipe for maturin pypi packages** (#217). Opt-in
-  declarative shape for libraries that ship a Rust CLI inside each wheel
-  (the `ruff` / `uv` / `pydantic-core` pattern). Declare `bin`, `stage_to`,
-  and optional `crate_path`; piot's scaffolded build job cross-compiles the
-  binary per target, stages it into the package source tree, and maturin
-  picks it up via `[tool.maturin].include`. Requires `build = "maturin"`
-  and non-empty `targets`. See
-  [Configuration → Bundled CLI](./docs/guide/configuration.md#bundled-cli)
-  and [Polyglot Rust library](./docs/guide/shapes/polyglot-rust.md) for a
-  worked example. No behavior change for existing packages that don't
-  declare the block.
-- **[Artifact contract reference page](./docs/guide/artifact-contract.md).**
-  New top-level reference documenting the `artifact_name` grammar
-  per `kind` × `build`, the `artifacts/<artifact-name>/` post-
-  download layout, and a missing-artifact diagnosis checklist.
-  Previously this material lived only in
-  `docs/guide/custom-build-workflows.md` (a niche page) and was hard
-  to find when the publish job's completeness check failed. No
-  contract change — just makes the existing contract discoverable.
-- **[Troubleshooting publish failures page](./docs/guide/troubleshooting.md).**
-  New error-string-keyed index covering the `Artifact completeness
-  check failed`, `spawn twine ENOENT`, OIDC HTTP 400, missing git
-  identity, `.devN` sdist, and PR-event no-publish failure modes,
-  each with the underlying cause and the fix.
-- **[Concepts → What runs on which event](./docs/guide/concepts.md#what-runs-on-which-event)**
-  table making it explicit that the publish step is gated on
-  `github.event_name != 'pull_request'`, and that the signal of a
-  real release is a tag push, not a green workflow-run on a PR.
-- **["piot's surface is plan + publish — build is yours" callout](./docs/getting-started.md#install)**
-  in Getting Started, recommending `npx putitoutthere init` in a
-  scratch directory as the canonical reference when migrating from
-  a different shape.
+- **Reusable workflow `.github/workflows/release.yml` (`workflow_call`).** The single user-facing surface. Consumer integration is one `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1` line in their own `release.yml`; pinned action versions, plan/build/publish orchestration, and GitHub Release creation all live inside. Three optional inputs: `environment` (default `release`), `node_version` (default `24`), `python_version` (default `3.12`). No `dry_run`, `working_directory`, or `config` inputs — the plan job is already side-effect-free, the config file is `putitoutthere.toml` at the repo root, period. The engine is invoked via `uses: thekevinscott/putitoutthere@v1` so the workflow file and the engine always agree on a single git ref.
+
+- **`[package.bundle_cli]` recipe for maturin pypi packages** (#217). Opt-in declarative shape for libraries that ship a Rust CLI inside each wheel (the `ruff` / `uv` / `pydantic-core` pattern). Declare `bin`, `stage_to`, and optional `crate_path`; the reusable workflow cross-compiles the binary per target, stages it into the package source tree, and maturin picks it up via `[tool.maturin].include`. Requires `build = "maturin"` and non-empty `targets`. See [README → Recipes → Rust CLI inside a PyPI wheel](./README.md#rust-cli-inside-a-pypi-wheel). No behavior change for existing packages that don't declare the block.
 
 ### Changed
 
-- **Repository renamed `put-it-out-there` → `putitoutthere`.** GitHub auto-redirects the old slug, but consumers with the old URL pinned in `package.json`, `Cargo.toml`, `pyproject.toml`, or workflow files should update them. Docs site moved to <https://thekevinscott.github.io/putitoutthere/>. See [MIGRATIONS.md](./MIGRATIONS.md#repository-renamed-put-it-out-there--putitoutthere) for the consumer-facing diff.
-- **Python build-step examples switched to `uv build`** across the
-  documentation (`docs/guide/shapes/python-library.md`,
-  `docs/guide/shapes/python-cibuildwheel.md`,
-  `docs/guide/dynamic-versions.md`). `python -m build` continues to
-  work — the change is example-only, not a contract change. Backends,
-  artifact names, and matrix fields are unchanged. See
-  [MIGRATIONS.md](./MIGRATIONS.md#python-shape-examples-now-use-uv-build) for the
-  before/after, when to follow it, and when not to.
+- **Public consumer surface collapsed to the README + the reusable workflow.** The CLI, the JS action (`action.yml`), and the diagnostic subcommands (`doctor`, `preflight`) are internal seams the reusable workflow invokes; consumers do not call them. The entire `docs/` directory is removed — `README.md` is the single user-facing surface. See [MIGRATIONS.md](./MIGRATIONS.md#public-surface-collapsed-to-a-reusable-workflow) for the before/after.
+- **Auth is OIDC trusted publishers only.** The reusable workflow does not pass long-lived registry tokens (`NPM_TOKEN`, `PYPI_API_TOKEN`, `CARGO_REGISTRY_TOKEN`) as secrets. The engine's env-var fallback code paths still exist (in `src/auth.ts`); they're just not reachable through the reusable workflow.
+- **Repository renamed `put-it-out-there` → `putitoutthere`.** GitHub auto-redirects the old slug, but consumers with the old URL pinned in `package.json`, `Cargo.toml`, `pyproject.toml`, or workflow files should update them. See [MIGRATIONS.md](./MIGRATIONS.md#repository-renamed-put-it-out-there--putitoutthere).
 
 ### Deprecated
 
@@ -63,7 +28,11 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Removed
 
-- _nothing yet_
+- **The entire `docs/` directory** (VitePress site, all guide pages, all shape walkthroughs). README is the single user-facing surface. Engine contracts that were documented in `docs/guide/{artifact-contract,runner-prerequisites}.md` moved to `notes/internals/` — internal references the reusable workflow honors so consumers don't have to know them.
+- **`.github/workflows/docs.yml` and `docs-test.yml`** — the docs site no longer exists.
+- **`build_workflow:` config field.** Removed from the schema in `src/config.ts`; configs declaring it now fail validation.
+- **`putitoutthere init` subcommand** and the templates it scaffolded. Source removed (`src/init.ts`, `src/templates.ts`, plus tests, plus `--force` and `--cadence` flag plumbing).
+- **`migrations/` directory** moved to `notes/migrations-pre-rewrite/`. Stale plans drafted against the prior hand-written-`release.yml` model.
 
 ### Fixed
 
@@ -92,7 +61,7 @@ are prefixed `**BREAKING**` and link to the matching section in
   `artifact_name` verbatim and need no changes; consumers running
   the `cachetta#26` encode/decode workaround should remove it once
   they upgrade. See [MIGRATIONS.md](./MIGRATIONS.md#package-names-with--no-longer-need-an-encode-decode-workaround) and
-  [Artifact contract → notes](./docs/guide/artifact-contract.md#naming-convention-reference).
+  [Artifact contract → notes](./notes/internals/artifact-contract.md#naming-convention-reference).
 - **Documentation accuracy pass** (#231). A docs-vs-code audit caught
   several places where reference material lagged behind shipped behavior.
   No code paths changed beyond a stale help-text line; existing configs
