@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 import { normalizeTarget, type Ctx, type Handler, type PublishResult, type TargetEntry } from '../types.js';
 import { publishPlatforms, type PlatformPkg } from './npm-platform.js';
-import { buildSubprocessEnv, nonEmpty } from '../env.js';
+import { buildSubprocessEnv, nonEmpty, oidcEnv } from '../env.js';
 import { USER_AGENT } from '../version.js';
 
 type NpmPkg = {
@@ -133,7 +133,12 @@ async function publishImpl(pkg: NpmPkg, version: string, ctx: Ctx): Promise<Publ
       cwd: pkg.path,
       // #138: minimal env. Avoid leaking the whole parent process.env
       // (and any unrelated step secrets) to npm.
-      env: buildSubprocessEnv(ctx.env),
+      // OIDC trusted publishing needs the GitHub Actions OIDC + context
+      // env vars (`ACTIONS_ID_TOKEN_REQUEST_*`, `GITHUB_*`, `RUNNER_*`)
+      // to mint a short-lived registry token from npm's
+      // `/oidc/mint-token` endpoint. Forward them only when OIDC is
+      // actually active.
+      env: buildSubprocessEnv(ctx.env, hasOidc ? oidcEnv() : {}),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {

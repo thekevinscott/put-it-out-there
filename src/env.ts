@@ -98,3 +98,49 @@ export function buildSubprocessEnv(
   }
   return out;
 }
+
+/**
+ * Env-var names a subprocess needs to perform GitHub Actions OIDC
+ * trusted-publisher auth (e.g. `npm publish --provenance` minting a
+ * short-lived registry token from npm's `/oidc/mint-token` endpoint).
+ *
+ * Deliberately separate from `DEFAULT_ENV_PASSTHROUGH`: handlers that
+ * don't do OIDC-backed publishing (cargo, twine) shouldn't see these.
+ * Call sites pass `oidcEnv()` into `buildSubprocessEnv`'s `extras`
+ * argument *only* when they've detected OIDC and want it forwarded.
+ *
+ * `ACTIONS_ID_TOKEN_REQUEST_*` are the bearer-token exchange pair the
+ * runner mints per-job. The `GITHUB_*` / `RUNNER_NAME` vars are public
+ * CI metadata npm reads to populate provenance attestations.
+ */
+const OIDC_ENV_PASSTHROUGH: readonly string[] = [
+  'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
+  'ACTIONS_ID_TOKEN_REQUEST_URL',
+  'GITHUB_ACTIONS',
+  'GITHUB_REPOSITORY',
+  'GITHUB_REPOSITORY_ID',
+  'GITHUB_REPOSITORY_OWNER',
+  'GITHUB_REPOSITORY_OWNER_ID',
+  'GITHUB_REF',
+  'GITHUB_SHA',
+  'GITHUB_RUN_ID',
+  'GITHUB_RUN_ATTEMPT',
+  'GITHUB_RUN_NUMBER',
+  'GITHUB_WORKFLOW',
+  'GITHUB_WORKFLOW_REF',
+  'GITHUB_WORKFLOW_SHA',
+  'GITHUB_SERVER_URL',
+  'GITHUB_EVENT_NAME',
+  'RUNNER_NAME',
+  'RUNNER_OS',
+  'RUNNER_ARCH',
+];
+
+export function oidcEnv(): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const name of OIDC_ENV_PASSTHROUGH) {
+    const v = process.env[name];
+    if (typeof v === 'string') out[name] = v;
+  }
+  return out;
+}

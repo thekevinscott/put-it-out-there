@@ -36,6 +36,23 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Fixed
 
+- **`npm publish --provenance` now actually reaches the OIDC mint-token
+  endpoint.** The npm handler invokes `execFileSync('npm', args, { env })`
+  with a stripped subprocess env (#138) — the allowlist (`PATH`, `HOME`,
+  `TMPDIR`, etc.) deliberately omits unrelated runner secrets but also
+  silently dropped `ACTIONS_ID_TOKEN_REQUEST_TOKEN` /
+  `ACTIONS_ID_TOKEN_REQUEST_URL` and the `GITHUB_*` / `RUNNER_*` context
+  vars that npm reads to mint a short-lived registry token. With those
+  missing, `npm publish` fell through to token auth, found no
+  `NODE_AUTH_TOKEN`, and exited with `ENEEDAUTH` — even when a trusted
+  publisher was registered and `id-token: write` was granted on the
+  workflow. Add an `oidcEnv()` helper in `src/env.ts` exposing the
+  required GitHub Actions OIDC + context vars; `src/handlers/npm.ts` and
+  `src/handlers/npm-platform.ts` forward it via the `extras` argument
+  when OIDC is detected, leaving non-OIDC publishes (cargo, twine)
+  unaffected. No consumer-side change required; OIDC trusted publishing
+  on npm now works end-to-end through the reusable workflow.
+
 - **Scaffolded `release.yml` now forwards `GITHUB_TOKEN` to the publish
   step.** piot has cut GitHub Releases alongside tag pushes since #26, but
   Actions doesn't auto-mount the runner token as an env var, so the

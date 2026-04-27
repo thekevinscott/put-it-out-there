@@ -89,6 +89,37 @@ known-tested versions.
   glob, and watch for a tag push + GitHub Release on the next
   workflow run.
 
+### `npm publish --provenance` reaches OIDC mint-token
+
+**Summary.** The npm handler ran `npm publish` in a subprocess whose
+env was stripped down to a minimal allowlist (`PATH`, `HOME`, etc.,
+per #138). The allowlist excluded `ACTIONS_ID_TOKEN_REQUEST_TOKEN`,
+`ACTIONS_ID_TOKEN_REQUEST_URL`, and the `GITHUB_*` / `RUNNER_*`
+context vars npm needs to mint a short-lived registry token from
+`https://registry.npmjs.org/-/npm/v1/oidc/mint-token`. Without them,
+`npm publish --provenance` silently fell through to token auth and
+failed with `ENEEDAUTH` even when a trusted publisher was registered.
+Fixed by adding `oidcEnv()` in `src/env.ts` and forwarding it via
+`buildSubprocessEnv`'s `extras` argument from `src/handlers/npm.ts`
+and `src/handlers/npm-platform.ts` when OIDC is detected. Non-OIDC
+publishes (cargo, twine) are unaffected.
+
+**Required changes.** None for working consumers. If you were
+working around this by setting `NPM_TOKEN` even though a trusted
+publisher was registered, you can drop the token now.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** A repo whose npm trusted
+publisher was registered correctly but never reached because of the
+env stripping will start succeeding as soon as it picks up the new
+engine version. No config change required.
+
+**Verification.** Push a release on a repo with `id-token: write`
+permissions and an npm trusted publisher registered for the package.
+Expect a successful publish with `provenance` attached, visible on
+the package's npmjs.com page.
+
 ### Publish path works end-to-end for slash-containing `pkg.name`
 
 **Summary.** Follow-up to the [`/`-encoding fix](#package-names-with--no-longer-need-an-encode-decode-workaround)

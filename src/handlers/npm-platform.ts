@@ -25,7 +25,7 @@ import { join } from 'node:path';
 
 import { sanitizeArtifactName } from '../config.js';
 import type { Ctx } from '../types.js';
-import { buildSubprocessEnv, nonEmpty } from '../env.js';
+import { buildSubprocessEnv, nonEmpty, oidcEnv } from '../env.js';
 
 export interface PlatformPkg {
   name: string;
@@ -177,7 +177,10 @@ function npmPublish(stagingDir: string, pkg: PlatformPkg, ctx: Ctx): void {
     execFileSync('npm', args, {
       cwd: stagingDir,
       // #138: minimal env; don't leak parent process.env to npm.
-      env: buildSubprocessEnv(ctx.env),
+      // OIDC trusted publishing needs the GitHub Actions OIDC +
+      // context env vars to mint a short-lived registry token. Forward
+      // them only when OIDC is actually active.
+      env: buildSubprocessEnv(ctx.env, hasOidc ? oidcEnv() : {}),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {
