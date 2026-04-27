@@ -124,6 +124,9 @@ jobs:
 
       - if: matrix.kind == 'npm'
         working-directory: ${{ matrix.path }}
+        # Build matrix can target Windows runners; default shell there is
+        # pwsh, but `if [ -f ... ]` is bash. Force bash for portability.
+        shell: bash
         run: |
           if [ -f package-lock.json ]; then
             npm ci

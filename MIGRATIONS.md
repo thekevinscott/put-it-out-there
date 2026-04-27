@@ -21,6 +21,31 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Reusable workflow's npm build step forces `shell: bash`
+
+**Summary.** The build matrix can target Windows runners. GitHub Actions
+defaults to `pwsh` for `run:` blocks on Windows, but the npm build's
+shape detection (`if [ -f package-lock.json ]; then npm ci; elif ... fi`)
+is bash syntax — PowerShell parsed it as a malformed expression and
+aborted with `ParserError` before any package manager ran. The step now
+sets `shell: bash` explicitly, which is portable across Linux, macOS,
+and Windows runners (Git Bash ships on `windows-latest`).
+
+**Required changes.** None.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Consumers whose plan includes
+an npm package targeting Windows runners (e.g. native node-addon shapes,
+`napi-rs` matrices) now succeed past the install step. Linux/macOS-only
+matrices are unaffected — bash was already the default there.
+
+**Verification.** An npm package with a Windows row in its plan
+completes the install + build step on `windows-latest`; the job log
+shows `Run if [ -f package-lock.json ]` executing under bash, not pwsh.
+
+---
+
 ### Reusable workflow exchanges OIDC token for `CARGO_REGISTRY_TOKEN`
 
 **Summary.** Crates publishes were failing with `error: no token found,

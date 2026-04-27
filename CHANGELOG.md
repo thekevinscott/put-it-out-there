@@ -45,6 +45,14 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Fixed
 
+- **Reusable workflow's npm build step now forces `shell: bash`.** (#244)
+  The build matrix can target Windows runners, where GitHub Actions defaults
+  to `pwsh` for `run:` blocks. The npm build's `if [ -f package-lock.json ]`
+  branch is bash syntax, which PowerShell parsed as a malformed expression
+  and aborted with `ParserError`. Adding `shell: bash` makes the step
+  portable across Linux, macOS, and Windows runners. No config changes
+  required for consumers; pure JS-on-ubuntu setups were unaffected.
+
 - **Reusable workflow now exchanges OIDC ID-token for a `CARGO_REGISTRY_TOKEN`
   before invoking the engine.** (#244) `cargo publish` was failing with
   `error: no token found, please run cargo login` because the publish

@@ -121,6 +121,10 @@ jobs:
           pnpm run build:action
 
       - name: Materialize fixture
+        # Build matrix runs on Linux, macOS, and Windows. GitHub Actions
+        # defaults to pwsh on Windows for `run:` blocks; force bash so
+        # find/xargs/perl behave consistently across all three runners.
+        shell: bash
         env:
           FIXTURE: ${{ inputs.fixture }}
           # Build steps for sdist need the same SETUPTOOLS_SCM_PRETEND_VERSION
@@ -131,10 +135,12 @@ jobs:
           set -euo pipefail
           rm -rf fixture-tree
           cp -r "test/fixtures/${FIXTURE}" fixture-tree
+          # perl -i is portable across GNU sed (Linux) and BSD sed (macOS);
+          # `sed -i ""` requires different argument shapes per platform.
           find fixture-tree \
             \( -name putitoutthere.toml -o -name package.json \
                -o -name Cargo.toml -o -name pyproject.toml \) -print0 \
-            | xargs -0 sed -i "s/__VERSION__/${PLANNED_VERSION}/g"
+            | xargs -0 perl -i -pe "s/__VERSION__/${PLANNED_VERSION}/g"
 
       # ---- pypi ----
       - if: matrix.kind == 'pypi'
@@ -169,6 +175,7 @@ jobs:
 
       - if: matrix.kind == 'npm'
         working-directory: fixture-tree/${{ matrix.path }}
+        shell: bash
         run: |
           if [ -f package-lock.json ]; then
             npm ci
