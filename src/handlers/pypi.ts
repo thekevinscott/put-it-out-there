@@ -187,8 +187,15 @@ async function publishImpl(
       );
     }
     const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
+    const stdout = (err as { stdout?: Buffer }).stdout?.toString('utf8').trim();
     const base = err instanceof Error ? err.message : String(err);
-    throw new Error(`twine upload failed${stderr ? `:\n${stderr}` : `: ${base}`}`, { cause: err });
+    // Twine sometimes writes its actual failure (4xx/5xx body, render
+    // diagnostic, etc.) to stdout rather than stderr; surface both so
+    // adopters see the registry's response, not a bare "Command failed".
+    const parts = [`twine upload failed: ${base}`];
+    if (stderr) parts.push(`--- stderr ---\n${stderr}`);
+    if (stdout) parts.push(`--- stdout ---\n${stdout}`);
+    throw new Error(parts.join('\n'), { cause: err });
   }
 
   return {

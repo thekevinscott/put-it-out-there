@@ -416,6 +416,32 @@ describe('pypi.publish', () => {
     fetchSpy.mockRestore();
   });
 
+  it('surfaces twine failure stdout when stderr is empty (#244)', async () => {
+    // Twine sometimes writes a 4xx/5xx response body or an unsupported-
+    // metadata diagnostic to stdout rather than stderr. The previous
+    // wrapper only forwarded stderr; the actual failure was lost and
+    // adopters saw a bare "Command failed" with no signal.
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    execMock.mockImplementation(() => {
+      throw Object.assign(new Error('twine exit 1'), {
+        stdout: Buffer.from('HTTPError: 400 Bad Request from https://upload.pypi.org/legacy/\nThe description failed to render in the default format of reStructuredText.'),
+        stderr: Buffer.from(''),
+      });
+    });
+    process.env.PYPI_API_TOKEN = 'tok';
+    await expect(
+      pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, artifactsRoot }),
+      ),
+    ).rejects.toThrow(/HTTPError: 400|reStructuredText/i);
+    fetchSpy.mockRestore();
+  });
+
   it('wraps ENOENT (twine not on PATH) with an actionable pointer at runner prereqs (#205)', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{}', { status: 404 }),
