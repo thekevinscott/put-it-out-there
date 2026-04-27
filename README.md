@@ -24,9 +24,8 @@ jobs:
       id-token: write
 ```
 
-That's the whole consumer file. Pinned action versions, `plan → build →
-publish` orchestration, and GitHub Release creation all live inside the
-reusable workflow.
+Pinned action versions, `plan → build → publish` orchestration, and GitHub
+Release creation all live inside the reusable workflow.
 
 Optional inputs — `with:` block at the call site:
 
