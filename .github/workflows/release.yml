@@ -1,0 +1,277 @@
+name: putitoutthere release
+
+# Reusable workflow for publishing to crates.io, PyPI, and npm.
+#
+# Consumer integration (their own .github/workflows/release.yml):
+#
+#   on:
+#     push: { branches: [main] }
+#     workflow_dispatch:
+#       inputs:
+#         dry_run: { type: boolean, default: false }
+#
+#   jobs:
+#     release:
+#       uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1
+#       with:
+#         dry_run: ${{ inputs.dry_run || false }}
+#       secrets: inherit
+#       permissions:
+#         contents: write
+#         id-token: write
+#
+# That is the entire surface a consumer touches.
+#
+# Engine version is pinned inside this file (PIOT_ENGINE_VERSION env on each
+# step that invokes the CLI). Bumping the engine = bumping that pin and
+# moving the v<major> floating tag. Consumers do not pick the engine version.
+
+on:
+  workflow_call:
+    inputs:
+      dry_run:
+        description: >-
+          Compute the release plan but skip publish, tag, and GitHub Release
+          creation. Build still runs so consumers can validate the matrix +
+          per-target build steps before flipping to a real release.
+        type: boolean
+        default: false
+      working_directory:
+        description: >-
+          Path to the directory containing your putitoutthere config,
+          relative to the repo root. Default `.` (root). Useful for repos
+          where putitoutthere lives under a subdir.
+        type: string
+        default: '.'
+      config:
+        description: >-
+          Config filename, resolved relative to `working_directory`.
+          Default `putitoutthere.toml`.
+        type: string
+        default: 'putitoutthere.toml'
+      environment:
+        description: >-
+          GitHub deployment environment to gate the publish job. Required-
+          reviewers + secret scoping are configured per-environment in the
+          consumer's repo settings. Default `release`.
+        type: string
+        default: 'release'
+      node_version:
+        description: >-
+          Node version for plan / publish runners and for kind = "npm" build
+          steps. Default `20` (LTS).
+        type: string
+        default: '20'
+      python_version:
+        description: >-
+          Python version for kind = "pypi" build / publish steps. Default
+          `3.12`.
+        type: string
+        default: '3.12'
+    secrets:
+      NPM_TOKEN:
+        description: >-
+          npm classic / granular token. Optional — OIDC trusted publishing is
+          preferred. Falls back to env-var auth when set.
+        required: false
+      PYPI_API_TOKEN:
+        description: >-
+          PyPI API token. Optional — OIDC is preferred. Falls back when set.
+        required: false
+      CARGO_REGISTRY_TOKEN:
+        description: >-
+          crates.io API token. Optional — OIDC via
+          `rust-lang/crates-io-auth-action` is preferred. Falls back when set.
+        required: false
+
+concurrency:
+  group: putitoutthere-release-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  # Engine version pin. Bumping the engine = bumping this string and
+  # moving the v<major> floating tag in this repo.
+  PIOT_ENGINE_VERSION: '0.1.43'
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - id: plan
+        name: putitoutthere plan
+        run: |
+          set -euo pipefail
+          npx -y "putitoutthere@${PIOT_ENGINE_VERSION}" plan \
+            --cwd '${{ inputs.working_directory }}' \
+            --config '${{ inputs.config }}' \
+            --json | tee plan.json
+          test -s plan.json
+          {
+            printf 'matrix<<PIOT_MATRIX_EOF\n'
+            cat plan.json
+            printf '\nPIOT_MATRIX_EOF\n'
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runs_on }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ---- pypi ----
+      - if: matrix.kind == 'pypi'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin'
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ${{ matrix.path }}
+          command: build
+          args: >-
+            --release
+            --out dist
+            ${{ matrix.target == 'sdist' && '--sdist' || format('--target {0}', matrix.target) }}
+
+      - if: matrix.kind == 'pypi' && matrix.build != 'maturin' && matrix.target == 'sdist'
+        # hatch-vcs / setuptools-scm derive the version from the latest git
+        # tag at build time — which is still the *previous* release at this
+        # point. Feed the planned version through setuptools-scm's global
+        # pretend-version env so the sdist filename matches what we're about
+        # to publish. Per-package variants are silently ignored by hatch-vcs;
+        # only the global one works.
+        working-directory: ${{ matrix.path }}
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ matrix.version }}
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --sdist --outdir dist
+
+      # ---- npm ----
+      - if: matrix.kind == 'npm'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          registry-url: 'https://registry.npmjs.org'
+
+      - if: matrix.kind == 'npm'
+        working-directory: ${{ matrix.path }}
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f pnpm-lock.yaml ]; then
+            npm install -g pnpm@9
+            pnpm install --frozen-lockfile
+          else
+            npm install
+          fi
+          npm run build --if-present
+
+      # ---- crates ----
+      # cargo publish builds on the registry side; no artifact needed
+      # at build time. The publish job invokes cargo directly.
+
+      - if: matrix.kind != 'crates'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_path }}
+
+  publish:
+    needs: [plan, build]
+    if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      # twine is the upload tool the pypi handler shells out to.
+      - name: Install twine
+        run: pip install twine
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Configure git identity for tagging
+        # Annotated tags require committer identity; hosted runners have
+        # none by default.
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: putitoutthere publish
+        env:
+          # NODE_AUTH_TOKEN matches the .npmrc template setup-node writes.
+          # NPM_TOKEN is accepted as an alias by the engine.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          DRY_RUN_FLAG=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          npx -y "putitoutthere@${PIOT_ENGINE_VERSION}" publish \
+            --cwd '${{ inputs.working_directory }}' \
+            --config '${{ inputs.config }}' \
+            $DRY_RUN_FLAG
+
+      # The engine creates annotated git tags + pushes to PyPI / npm /
+      # crates.io but does NOT cut GitHub Releases. Backfill that here so
+      # the project's /releases page tracks the tag history. Auto-generated
+      # notes pull PR titles between this tag and the previous one.
+      - name: Create GitHub Release(s) for new tag(s)
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git fetch --tags origin
+          new_tags=$(git tag --points-at HEAD)
+          if [ -z "$new_tags" ]; then
+            echo "No tags on HEAD; nothing to release on GitHub."
+            exit 0
+          fi
+          for tag in $new_tags; do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "GitHub Release $tag already exists; skipping."
+              continue
+            fi
+            gh release create "$tag" --title "$tag" --generate-notes
+            echo "Created GitHub Release for $tag"
+          done

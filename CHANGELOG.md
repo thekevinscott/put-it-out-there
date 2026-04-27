@@ -12,6 +12,8 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Added
 
+- **Reusable workflow `.github/workflows/release.yml` (`workflow_call`).** The single user-facing surface going forward. Consumer integration is one `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1` line in their own `release.yml`; pinned action versions, plan/build/publish orchestration, and GitHub Release creation all live inside. Inputs cover `dry_run`, `working_directory`, `config`, `environment`, `node_version`, `python_version`. Engine version is pinned via `PIOT_ENGINE_VERSION` env in the workflow file itself — consumers do not pick it.
+
 - **`[package.bundle_cli]` recipe for maturin pypi packages** (#217). Opt-in
   declarative shape for libraries that ship a Rust CLI inside each wheel
   (the `ruff` / `uv` / `pydantic-core` pattern). Declare `bin`, `stage_to`,
@@ -64,7 +66,13 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Removed
 
-- **`build_workflow:` config field, `cibuildwheel` shape page, and the doctor/preflight PR-gate workflow shape from the documented surface.** The engine still parses `build_workflow` (no schema enforcement change yet) but consumers are no longer encouraged to use it; shapes that don't fit piot's named build modes are explicitly out of scope per [non-goal #4](./notes/design-commitments.md#non-goals). The cibuildwheel shape depended on `build_workflow` and is now also out of scope. The `putitoutthere-check.yml` PR-gate pattern is no longer documented; trust-policy and token-scope checks fold into the reusable workflow's publish phase as internal pre-publish steps.
+- **`build_workflow:` config field.** Removed from the schema in `src/config.ts`. Configs that still declare it now fail validation. Per [non-goal #4](./notes/design-commitments.md#non-goals), shapes that don't fit piot's named build modes write their own release workflow.
+- **`putitoutthere init` subcommand and the templates it scaffolded.** Source removed (`src/init.ts`, `src/templates.ts`, plus tests). Consumer scaffolding is no longer a concern — consumers integrate by adding a ~15-line `release.yml` that `uses:` the reusable workflow.
+- **8 single-shape walkthrough pages** consolidated into `docs/guide/configuration.md` as inline config examples: `python-library`, `npm-library`, `rust-crate`, `rust-workspace`, `npm-workspace`, `rust-pyo3`, `rust-napi`, `dual-family-npm`. Two genuinely shape-specific pages survive: `polyglot-rust` and `bundled-cli`.
+- **`docs/guide/nightly-release.md`** — folded to a one-line note on the trailer page (just `on: schedule:` in the consumer's `release.yml`).
+- **`docs/guide/runner-prerequisites.md` and `docs/guide/artifact-contract.md`** moved to `notes/internals/` — these described the contract a hand-written consumer `release.yml` had to honor; the reusable workflow honors it internally.
+- **The `cibuildwheel` shape and the `putitoutthere-check.yml` PR-gate pattern** are no longer documented; trust-policy and token-scope checks fold into the reusable workflow's publish phase as internal pre-publish steps.
+- **`migrations/` directory** moved to `notes/migrations-pre-rewrite/`. The plans there were drafted against the prior hand-written-`release.yml` model and are stale.
 
 ### Fixed
 

@@ -133,34 +133,141 @@ targets = [
 
 With `build = "napi"` or `build = "bundled-cli"` set, piot synthesizes a per-platform package for each target, publishes them, then rewrites the top-level's `optionalDependencies` to pin them at the just-published version — the esbuild/biome family pattern. See [npm platform packages](/guide/npm-platform-packages) for the full shape.
 
-## Build-side responsibilities
+## Build phase
 
-piot covers *publish-side* packaging: given artifacts on disk, it produces the registry publishes described above. It does **not** cross-compile, select GitHub Actions runners, or generate a matrix. Your workflow's `build` job owns:
+The reusable workflow runs the build phase internally — toolchain
+setup, per-target compilation, artifact upload — based on the
+`kind` and `build` fields each package declares. Consumers do not
+write build steps.
 
-- Picking runner OSes per target (e.g. `ubuntu-24.04-arm` for `aarch64-unknown-linux-gnu`).
-- Running `maturin build --target …`, `napi build --target …`, `cargo build --target …` etc.
-- Staging the outputs where the `publish` job can find them.
+If you need a binary archive attached to the GitHub Release (the
+`curl | tar x` install shape), compose with
+[`cargo-dist`](https://axodotdev.github.io/cargo-dist/) or
+[`goreleaser`](https://goreleaser.com/) in a separate workflow;
+piot doesn't emit release tarballs.
 
-If you want a pre-built CLI archive attached to the GitHub Release (the `curl | tar x` install shape), compose with [`cargo-dist`](https://axodotdev.github.io/cargo-dist/) or [`goreleaser`](https://goreleaser.com/) alongside piot; piot doesn't emit release tarballs.
+## Example shapes
 
-## Example
+Drop one of these into `putitoutthere.toml` to start.
+
+### Single-package Python library to PyPI
 
 ```toml
 [putitoutthere]
 version = 1
 
 [[package]]
-name = "my-rust"
-kind = "crates"
-path = "crates/my-rust"
+name  = "my-lib"
+kind  = "pypi"
+path  = "."
+paths = ["src/**", "pyproject.toml"]
+build = "hatch"            # or "setuptools"
+tag_format = "v{version}"  # single-package repos often want this
+```
+
+### Single-package npm library
+
+```toml
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "my-lib"
+kind  = "npm"
+path  = "."
+paths = ["src/**", "package.json"]
+tag_format = "v{version}"
+```
+
+### Single-package Rust crate to crates.io
+
+```toml
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "my-crate"
+kind  = "crates"
+path  = "."
+paths = ["src/**", "Cargo.toml"]
+tag_format = "v{version}"
+```
+
+### Multi-crate Rust workspace
+
+```toml
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "my-core"
+kind  = "crates"
+path  = "crates/core"
+paths = ["crates/core/**"]
+
+[[package]]
+name       = "my-macros"
+kind       = "crates"
+path       = "crates/macros"
+paths      = ["crates/macros/**"]
+depends_on = ["my-core"]   # cascade: a my-core change ships my-macros too
+```
+
+### Multi-package npm workspace
+
+```toml
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "@my/core"
+kind  = "npm"
+path  = "packages/core"
+paths = ["packages/core/**"]
+
+[[package]]
+name       = "@my/parser"
+kind       = "npm"
+path       = "packages/parser"
+paths      = ["packages/parser/**"]
+depends_on = ["@my/core"]
+```
+
+### Polyglot: Rust crate + PyO3 wheels + npm bundled CLI
+
+```toml
+[putitoutthere]
+version = 1
+
+[[package]]
+name  = "my-rust"
+kind  = "crates"
+path  = "crates/my-rust"
 paths = ["crates/my-rust/**"]
 
 [[package]]
-name = "my-py"
-kind = "pypi"
-path = "py/my-py"
-paths = ["py/my-py/**"]
-build = "maturin"
-targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
+name       = "my-py"
+kind       = "pypi"
+path       = "py/my-py"
+paths      = ["py/my-py/**"]
+build      = "maturin"
+targets    = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
+depends_on = ["my-rust"]
+
+[[package]]
+name       = "my-cli"
+kind       = "npm"
+path       = "packages/ts"
+paths      = ["packages/ts/**"]
+build      = "bundled-cli"
+targets    = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 depends_on = ["my-rust"]
 ```
+
+A change to `crates/my-rust/` cascades: the crate ships, then the
+Python wheels and npm family ship on top. A change to only the
+TS shim ships just the npm package.
+
+See [Polyglot Rust library](/guide/shapes/polyglot-rust) for the
+full walkthrough including the cargo workspace + maturin layout
+gotchas.

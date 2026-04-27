@@ -75,8 +75,8 @@ Every push to `main` triggers the release workflow, which runs three jobs:
 The reusable workflow internally runs the plan → build → publish
 loop. Build steps are emitted from the matrix `plan` produces and
 run inside the workflow; the consumer doesn't see the structure.
-See the [artifact contract](/guide/artifact-contract) for the
-file-layout invariants the publish phase enforces.
+The file-layout invariants the publish phase enforces are
+documented internally in [`notes/internals/artifact-contract.md`](https://github.com/thekevinscott/putitoutthere/blob/main/notes/internals/artifact-contract.md).
 :::
 
 ## What runs on which event

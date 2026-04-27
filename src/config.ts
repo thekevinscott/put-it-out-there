@@ -114,20 +114,6 @@ const PACKAGE_BASE = {
     }),
   smoke: z.string().optional(),
   trust_policy: TRUST_POLICY.optional(),
-  // #216: opt-in per-package build delegation. When set, piot emits the
-  // filename on each matrix row so the consumer's `release.yml` can
-  // branch to a `uses: ./.github/workflows/<file>` job (static `uses:`,
-  // since GitHub Actions doesn't support dynamic workflow references).
-  // Pure metadata — piot doesn't auto-wire the scaffold. See
-  // docs/guide/custom-build-workflows.md for the composition pattern.
-  build_workflow: z
-    .string()
-    .min(1)
-    .refine((s) => !s.includes('/') && !s.includes('\\'), {
-      message:
-        'build_workflow must be a bare filename (e.g. "publish-python.yml"), not a path — the consumer workflow sits in .github/workflows/',
-    })
-    .optional(),
 };
 
 // #217: opt-in "bundle a Rust CLI into every wheel" recipe. Declared

@@ -19,9 +19,7 @@ Rust users can `cargo install` the same binary.
 | Emit a per-target build matrix with a sensible default runner per triple      | ✅     |               |
 | OIDC trusted publishing to npm, with `--provenance`                           | ✅     |               |
 | Skip-if-already-published idempotency on every package in the family          | ✅     |               |
-| Compile the binary (`cargo build --release --target …`, `go build`, etc.)    |        | ✅            |
 | Provide the launcher script that `spawn`s the right per-platform binary       |        | ✅            |
-| Install toolchains on build runners                                           |        | ✅ ([runner prereqs](/guide/runner-prerequisites)) |
 
 The family layout is identical to `build = "napi"`; only the
 payload differs — a statically-linked binary instead of a
@@ -104,50 +102,6 @@ at the published version. npm's resolver installs exactly one of
 them at consumer install time, and the launcher `require.resolve`s
 into it.
 
-## Workflow shape
-
-The build job compiles the binary once per target:
-
-```yaml
-build:
-  needs: plan
-  if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
-  strategy:
-    fail-fast: false
-    matrix:
-      include: ${{ fromJSON(needs.plan.outputs.matrix) }}
-  runs-on: ${{ matrix.runs_on }}
-  steps:
-    - uses: actions/checkout@v4
-      with: { fetch-depth: 0 }
-    - uses: dtolnay/rust-toolchain@stable
-      if: matrix.kind == 'npm'
-      with:
-        targets: ${{ matrix.target }}
-    - name: Build CLI
-      if: matrix.kind == 'npm'
-      run: |
-        cargo build --release --target ${{ matrix.target }} -p my-cli
-        mkdir -p dist
-        cp target/${{ matrix.target }}/release/my-cli* dist/
-    - uses: actions/upload-artifact@v4
-      with:
-        name: ${{ matrix.artifact_name }}
-        path: ${{ matrix.artifact_path }}
-```
-
-Substitute `go build` / `zig build` / whatever your toolchain is.
-The contract is: each per-target matrix row drops a binary where
-piot expects it. piot handles the rest.
-
-## Publish job prerequisites
-
-- **Node on PATH**, with `registry-url: https://registry.npmjs.org`.
-- **A git committer identity.** piot cuts an annotated tag.
-- If you're also publishing a crate, **Rust toolchain on PATH**.
-
-See [runner prerequisites](/guide/runner-prerequisites).
-
 ## One-time prerequisites before your first release
 
 1. Register a [trusted publisher](/guide/auth#npm) on npm for
@@ -188,19 +142,12 @@ See [runner prerequisites](/guide/runner-prerequisites).
 - **Mixing with a napi library under one top-level is not
   supported.** Each `[[package]]` picks one `build` mode. If you
   need `require('my-lib')` to load a native addon *and* `my-lib`
-  on PATH to run the CLI, see
-  [Dual-family npm](/guide/shapes/dual-family-npm) for the
-  split-package workaround.
+  on PATH to run the CLI, split into two top-level packages.
 
 ## Further reading
 
 - [npm platform packages](/guide/npm-platform-packages) — the
   family mechanism shared with `build = "napi"`.
-- [Rust + napi npm](/guide/shapes/rust-napi) — if your family
-  ships a native addon rather than a binary.
-- [Dual-family npm](/guide/shapes/dual-family-npm) — both an
-  addon and a CLI binary from the same Rust core.
-- [Runner prerequisites](/guide/runner-prerequisites).
 - [Configuration reference](/guide/configuration) —
   specifically [Target entries](/guide/configuration#target-entries)
   for per-runner overrides.

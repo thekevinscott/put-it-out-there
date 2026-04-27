@@ -158,9 +158,7 @@ version cleanly.
 
 ## Related
 
-- [Runner prerequisites](/guide/runner-prerequisites) — twine +
-  Python + git identity on the publish runner.
-- [Single-package Python library shape](/guide/shapes/python-library) —
-  end-to-end worked example.
+- [Configuration](/guide/configuration) — Python config examples
+  covering `setuptools` / `hatch` / `maturin` shapes.
 - [Design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md) —
   non-goal #1 (no version computation).

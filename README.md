@@ -81,32 +81,19 @@ just the npm package.
 
 ## Library shapes
 
-End-to-end walkthroughs for the common shapes. Pick the one that matches
-your repo:
+Single-package Python / npm / Rust libraries and multi-package workspaces are
+covered by [Configuration](./docs/guide/configuration.md), which has worked
+config blocks per shape. Two patterns are non-obvious enough to warrant a
+dedicated page:
 
-**Single-package**
+- [Polyglot Rust library](./docs/guide/shapes/polyglot-rust.md) — one Rust
+  core feeds all three registries (crates.io + PyPI + npm).
+- [Bundled-CLI npm family](./docs/guide/shapes/bundled-cli.md) — a compiled
+  CLI shipped as an npm per-platform family (the `esbuild` / `biome` shape).
 
-- [Python library](./docs/guide/shapes/python-library.md) — one `pyproject.toml` to PyPI
-- [npm library](./docs/guide/shapes/npm-library.md) — one `package.json` to npm
-- [Rust crate](./docs/guide/shapes/rust-crate.md) — one `Cargo.toml` to crates.io
-
-**Multi-package workspaces**
-
-- [Rust workspace](./docs/guide/shapes/rust-workspace.md) — multiple crates with `depends_on` cascade
-- [npm workspace](./docs/guide/shapes/npm-workspace.md) — multiple npm packages, shared dependency graph
-
-**Rust core, multi-registry**
-
-- [Rust + PyO3 wheels](./docs/guide/shapes/rust-pyo3.md) — crate + PyPI (no napi)
-- [Rust + napi npm](./docs/guide/shapes/rust-napi.md) — crate + npm family (no PyPI)
-- [Polyglot Rust library](./docs/guide/shapes/polyglot-rust.md) — all three registries from one core
-
-**Distribution patterns**
-
-- [Bundled-CLI npm family](./docs/guide/shapes/bundled-cli.md) — compiled CLI shipped as an npm per-platform family
-- [Dual-family npm (CLI + napi)](./docs/guide/shapes/dual-family-npm.md) — one library with both an addon and a binary
-
-Full index at [`docs/guide/shapes/`](./docs/guide/shapes/).
+Shapes that don't fit putitoutthere's named build modes (`cibuildwheel`,
+custom `Makefile`s, exotic cross-compile rigs) write their own release
+workflow — see [`notes/design-commitments.md`](./notes/design-commitments.md).
 
 ## Trusted publishers
 
@@ -138,5 +125,5 @@ authoritative non-goals. Highlights:
 - [Design commitments](./notes/design-commitments.md) — what piot is and isn't.
 - [Design proposal](./notes/4-17-2026-initial-plan/plan/proposal.md) — why this tool exists.
 - [Implementation plan](./notes/4-17-2026-initial-plan/plan/plan.md) — exhaustive reference.
-- [Migration guides](./migrations/) — per-repo plans for adopting putitoutthere.
+- [Pre-rewrite migration notes](./notes/migrations-pre-rewrite/) — per-repo plans drafted against the prior hand-written-`release.yml` model. Stale; will be redone once the reusable workflow lands.
 - [v0 epic](https://github.com/thekevinscott/putitoutthere/issues/2) — remaining work.

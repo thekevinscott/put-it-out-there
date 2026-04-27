@@ -10,9 +10,9 @@ point that `@`-includes this file, so edit here — not there.
 - **`notes/`** — working notes, audits, handoffs, and session artifacts. Not rendered, not public. Put session debriefs, post-mortems, handoff briefs, and scratch planning here.
   - `notes/audits/YYYY-MM-DD-<topic>.md` — post-hoc investigations and bug catalogues.
   - `notes/handoff/YYYY-MM-DD-<topic>.md` — handoff briefs for the next agent/session.
-- **`migrations/`** — per-library migration plans for moving existing packages onto `putitoutthere`.
-
 When in doubt: if it would confuse a first-time user reading the docs site, it belongs in `notes/`, not `docs/`.
+
+`notes/migrations-pre-rewrite/` holds per-library adoption plans drafted against the prior hand-written-`release.yml` model. Stale; do not extend. Once the reusable workflow lands, those plans will be redone from scratch and live somewhere appropriate.
 
 ## Design commitments
 
@@ -88,6 +88,3 @@ entries go under `## Unreleased`. Each entry uses this structure:
 When a version is cut, the release process renames `## Unreleased` to
 `## v<OLD> → v<NEW>` in both files and opens a fresh `## Unreleased` block.
 
-Don't confuse `MIGRATIONS.md` (upgrade guide between `putitoutthere`
-versions) with `migrations/` at the repo root (per-library plans for
-*adopting* `putitoutthere` from hand-rolled tooling).

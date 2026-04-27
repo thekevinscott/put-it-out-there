@@ -82,41 +82,7 @@ targets = [
 depends_on = ["my-crate"]
 ```
 
-## Workflow shape
-
-The release workflow runs three phases internally
-(`plan → build → publish`). The example below is a hand-written
-`release.yml` from the prior model; once the reusable workflow
-lands, the consumer file collapses to a few `uses:` lines. Sketch:
-
-```yaml
-jobs:
-  plan:
-    # scaffolded by piot
-    outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
-
-  build:
-    needs: plan
-    if: fromJSON(needs.plan.outputs.matrix).include != null
-    strategy:
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    runs-on: ${{ matrix.runner }}        # you set this per target
-    steps:
-      # ...install toolchain...
-      - if: matrix.kind == 'pypi'
-        run: maturin build --release --target ${{ matrix.target }}
-      - if: matrix.kind == 'npm'
-        run: napi build --release --target ${{ matrix.target }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.name }}-${{ matrix.target }}
-          path: target/**/release/*
-
-  publish:
-    needs: build
-    # scaffolded by piot
-```
+## Per-target runner selection
 
 piot's planner maps each triple to a sensible default runner
 (`ubuntu-24.04-arm` for aarch64 Linux, `macos-latest` for Darwin,
@@ -126,32 +92,14 @@ per target, use object-form `targets` entries in
 
 ```toml
 targets = [
-  "x86_64-unknown-linux-gnu",                                           # default runner
+  "x86_64-unknown-linux-gnu",                                            # default runner
   { triple = "aarch64-unknown-linux-gnu", runner = "ubuntu-24.04-arm" }, # explicit
   { triple = "aarch64-apple-darwin",      runner = "macos-14" },         # non-default
 ]
 ```
 
-The emitted matrix rows carry a `runner` field the workflow reads
-as `runs-on` (see the build job above, or let the scaffolded
-`release.yml` wire it for you).
-
-## Publish job prerequisites
-
-The scaffolded `publish` job checks out the repo, installs Node, and
-invokes the piot action. For this shape, **it also needs**:
-
-- **Python + twine on PATH.** The PyPI handler shells out to
-  `twine upload`. Add `actions/setup-python@v5` and `pip install twine`
-  before the piot step. See [runner prerequisites](/guide/runner-prerequisites).
-- **A git committer identity.** piot cuts an annotated tag per
-  package. On hosted runners, `user.name` / `user.email` are unset;
-  configure `github-actions[bot]` before the piot step.
-- **`SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<PKG>`** when any PyPI package
-  uses dynamic versioning (hatch-vcs / setuptools-scm). Maturin reads
-  the version from `Cargo.toml`, so a maturin-only shape typically
-  doesn't need this — but a mixed shape often does. See
-  [dynamic versions](/guide/dynamic-versions).
+The reusable workflow consumes the emitted `runner` field
+automatically — consumers don't wire `runs-on:` themselves.
 
 ## One-time prerequisites before your first release
 
@@ -199,7 +147,7 @@ stage_to   = "src/my_py/_binary"
 crate_path = "crates/my-rust"
 ```
 
-The scaffolded build job does the cross-compile + stage step before
+The reusable workflow does the cross-compile + stage step before
 maturin runs, per target. Your `pyproject.toml` ties the staged
 binary into a `console_scripts` entry:
 
@@ -257,7 +205,5 @@ Full field reference: [Configuration → Bundled CLI](/guide/configuration#bundl
 - [Concepts](/guide/concepts) — plan/build/publish, cascade, idempotency.
 - [npm platform packages](/guide/npm-platform-packages) — the family pattern in detail.
 - [Authentication](/guide/auth) — trusted publisher setup.
-- [Runner prerequisites](/guide/runner-prerequisites) — twine, git identity, and other non-obvious runner needs.
 - [Dynamic versions](/guide/dynamic-versions) — the env-var handoff for `hatch-vcs` / `setuptools-scm`.
-- [Configuration reference](/guide/configuration).
-- [Single-package Python library](/guide/shapes/python-library) — the simpler shape if you don't need Rust or napi.
+- [Configuration reference](/guide/configuration) — single-package Python / npm / Rust examples for simpler shapes.

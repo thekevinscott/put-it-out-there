@@ -21,38 +21,72 @@ Each section covers five things, in order:
 
 ## Unreleased
 
-### Public surface scoped to the reusable workflow
+### Public surface collapsed to a reusable workflow
 
-**Summary.** The consumer surface is being collapsed to a single
-reusable GitHub Actions workflow (`uses:
-thekevinscott/putitoutthere/.github/workflows/release.yml@v1`) plus
-a `putitoutthere.toml` config file. The CLI, the JS action, the
-`putitoutthere-check.yml` PR-gate pattern, the
-`docs/guide/custom-build-workflows.md` escape hatch, and the
-`cibuildwheel` shape are removed from the documented surface. The
-reusable workflow itself has not landed yet; this change captures
-the direction in [`notes/design-commitments.md`](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md)
-and prunes docs that described the prior model. See the
-[design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md)
+**Summary.** The consumer surface is now one line in a `release.yml`:
+
+```yaml
+jobs:
+  release:
+    uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1
+    with:
+      dry_run: ${{ inputs.dry_run || false }}
+    secrets: inherit
+    permissions:
+      contents: write
+      id-token: write
+```
+
+Plus the consumer's existing `putitoutthere.toml`. Triggers
+(`on: push`, `on: schedule`, `on: workflow_dispatch`) live in the
+consumer's `release.yml`; everything below them — pinned action
+versions, plan/build/publish orchestration, runner toolchain setup,
+artifact upload/download, GitHub Release creation — moves into the
+reusable workflow that piot ships. The CLI and the JS action become
+internal seams the reusable workflow invokes; consumers do not call
+them. See [design commitments](https://github.com/thekevinscott/putitoutthere/blob/main/notes/design-commitments.md)
 for the authoritative non-goals.
 
-**Required changes.** None for working consumers. Existing
-hand-written `release.yml` files keep working until the reusable
-workflow lands and consumers migrate. When that lands, a follow-up
-migration entry will document the before/after.
+**Required changes.**
 
-**Deprecations removed.** None enforced in code yet. The
-`build_workflow:` config field still parses; future versions will
-remove it entirely.
+| Before (hand-written `release.yml`) | After |
+|-----|-----|
+| ~100 lines of YAML: plan job calling `npx putitoutthere plan`, build matrix with per-kind setup steps, publish job with twine install + git identity + GitHub Release backfill, hand-pinned `actions/checkout@vN`, `actions/upload-artifact@vN`, `actions/download-artifact@vN` versions | `uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1` |
+| `putitoutthere init` to scaffold the workflow | Subcommand removed; consumers add the `release.yml` shown above by hand |
+| `[[package]].build_workflow = "publish-foo.yml"` for unsupported shapes | Removed. Shapes that don't fit piot's named build modes write their own release workflow that doesn't use piot |
+| `docs/guide/shapes/{python-library,npm-library,rust-crate,rust-workspace,npm-workspace,rust-pyo3,rust-napi,dual-family-npm,python-cibuildwheel}.md` walkthroughs | Consolidated into the Configuration page as inline example blocks. `polyglot-rust` and `bundled-cli` remain as standalone pages because they have non-obvious shape-specific gotchas |
+| `docs/guide/{runner-prerequisites,artifact-contract,nightly-release,custom-build-workflows,testing-your-release-workflow}.md` | Moved to `notes/internals/` (the first two are internal contract docs; the rest deleted — runner prereqs, artifact contract, and "scaffold a workflow" are no longer consumer concerns) |
 
-**Behavior changes without code changes.** None. Engine behavior
-(plan, cascade, version bump, registry handlers, completeness
-check, idempotency) is unchanged.
+**Deprecations removed.** `build_workflow:` is no longer in the
+config schema (`src/config.ts`). Configs that still declare it now
+fail validation. `putitoutthere init` and `--cadence` / `--force`
+flags are removed from the CLI.
 
-**Verification.** `pnpm --filter putitoutthere-docs test:unit &&
-pnpm --filter putitoutthere-docs build` passes; deleted pages do
-not appear in the sidebar; remaining pages carry a "page being
-rewritten" banner where they reference the prior integration model.
+**Behavior changes without code changes.** Engine behavior (plan,
+cascade, version bump, registry handlers, completeness check,
+idempotency, OIDC trust-policy validation) is unchanged. The
+reusable workflow internally pins:
+
+- `actions/checkout@v4` (`fetch-depth: 0`)
+- `actions/setup-node@v4`
+- `actions/setup-python@v5`
+- `actions/upload-artifact@v4`
+- `actions/download-artifact@v4`
+- `PyO3/maturin-action@v1`
+
+If a consumer was running newer majors (e.g. coaxer hit
+`download-artifact@v8` defaults that broke the artifact-naming
+contract), the reusable workflow standardises everyone on the
+known-tested versions.
+
+**Verification.**
+
+- `pnpm --filter putitoutthere-docs test:unit && pnpm --filter putitoutthere-docs build` passes.
+- `pnpm test:unit` passes (725/725 in the main repo).
+- A consumer's first cutover: drop in the 15-line `release.yml`
+  shown above, push a commit that touches a `[[package]].paths`
+  glob, and watch for a tag push + GitHub Release on the next
+  workflow run.
 
 ### Publish path works end-to-end for slash-containing `pkg.name`
 

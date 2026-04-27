@@ -12,7 +12,7 @@ piot is a good fit if you can answer **yes** to most of these:
 - [ ] You use (or are willing to use) **OIDC trusted publishing** on each registry. Long-lived tokens work as a fallback, but OIDC is the happy path.
 - [ ] You build your artifacts in **GitHub Actions**. piot ships as a reusable workflow; that runtime is assumed.
 - [ ] You're comfortable with **one tag per package** — defaults to `{name}-v{version}`, or pick your own template via [`tag_format`](/guide/configuration).
-- [ ] Your release trigger is **up to you**: merge to `main`, scheduled cron, or manual dispatch all work. See the [nightly release recipe](/guide/nightly-release) for the cron shape.
+- [ ] Your release trigger is **up to you**: merge to `main`, scheduled cron, or manual dispatch all work — they all live in your `release.yml`'s `on:` block.
 - [ ] The default bump is **`patch` whenever a package's files change**. Opt into explicit `minor`/`major` bumps (or `skip`) via a [commit trailer](/guide/trailer) — trailers are optional.
 
 piot is probably **not** the right tool if:
@@ -54,14 +54,12 @@ to piot, two things trip up most migrations:
 
 ## Pick your library shape
 
-Worked examples for the common shapes. Note that shape pages still
-describe the prior hand-written-`release.yml` integration model and
-will be rewritten as the reusable workflow surface lands.
+Single-package Python / npm / Rust libraries and multi-package workspaces
+are covered by [Configuration](/guide/configuration) — that page has worked
+config blocks for each. Two non-obvious patterns get their own walkthroughs:
 
-- [**Single-package Python library**](/guide/shapes/python-library) — one `pyproject.toml`, publishing to PyPI.
-- [**Polyglot Rust library** (Rust crate + PyO3 wheel + napi npm)](/guide/shapes/polyglot-rust) — one Rust core, three artifacts.
-
-More shapes at [Library shapes](/guide/shapes/).
+- [**Polyglot Rust library**](/guide/shapes/polyglot-rust) — one Rust core feeds crates.io + PyPI + npm.
+- [**Bundled-CLI npm family**](/guide/shapes/bundled-cli) — a compiled CLI shipped as an npm per-platform family.
 
 ## Minimum config
 
