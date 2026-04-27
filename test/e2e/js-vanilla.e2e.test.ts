@@ -1,8 +1,8 @@
 /**
- * Canary E2E test. Runs the `putitoutthere` CLI against a real npm
- * fixture and publishes a throwaway version on every CI run (PR or
- * push). The point: catch publish-side breakage *before* it ships
- * — exactly the class of bug a `npm publish` ENEEDAUTH-on-OIDC
+ * E2E for `js-vanilla` — npm OIDC + plain `npm publish`. The live
+ * canary; publishes a throwaway `piot-fixture-zzz-cli` version on
+ * every CI run (PR or push). Catches publish-side breakage *before*
+ * it ships — the class of bug a `npm publish` ENEEDAUTH-on-OIDC
  * regression would otherwise only surface post-merge.
  *
  * Gating:
@@ -17,7 +17,7 @@
  *   --provenance` reach OIDC, this test fails the same way
  *   `release-npm.yml` did on run 24972181242.
  *
- * Issue #28.
+ * Issues #28, #244.
  */
 
 import { rmSync } from 'node:fs';

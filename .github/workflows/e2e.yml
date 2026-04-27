@@ -1,8 +1,12 @@
 name: E2E
 
-# Canary E2E. Publishes to the `piot-fixture-zzz-cli` npm package
-# (purpose-built for this; throwaway 0.0.{unix_seconds} versions) on
-# every PR and every push to main, via OIDC trusted publishing.
+# Per-fixture e2e matrix. One job per distinct publish-path
+# manifestation; each runs `plan` + `publish --dry-run` against its
+# fixture, and the `js-vanilla` (live canary) job additionally runs a
+# real `npm publish` via OIDC trusted publishing on every PR + push
+# to main. As trusted publishers are registered for the other
+# fixtures (#244 step 2), each fixture's e2e file gains its own live
+# block and joins the canary as a real-publish gate.
 #
 # Why publish on PRs and not just on main: catching publish-side
 # breakage post-merge (release-npm.yml run 24972181242 — ENEEDAUTH
@@ -12,8 +16,8 @@ name: E2E
 # merge instead of breaking the next real release.
 #
 # Triggers:
-# - pull_request           → live canary publish.
-# - push to main           → live canary publish (continuous dogfood).
+# - pull_request           → live canary publish + dry-run others.
+# - push to main           → live canary publish + dry-run others.
 # - workflow_dispatch      → live canary publish unless caller passes
 #                            `publish: false` to opt out.
 
@@ -34,11 +38,25 @@ concurrency:
 
 jobs:
   e2e:
+    name: e2e (${{ matrix.fixture }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     environment: e2e
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture:
+          - js-vanilla
+          - js-napi
+          - js-bundled-cli
+          - js-python-no-rust
+          - python-pure-hatch
+          - python-pure-sdist-only
+          - python-rust-maturin
+          - rust-crate-only
+          - polyglot-everything
     steps:
       - uses: actions/checkout@v6
         with:
@@ -68,10 +86,41 @@ jobs:
             echo "publish=1" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run e2e suite
+      - name: Build CLI
+        run: pnpm run build
+
+      - name: Run e2e for ${{ matrix.fixture }}
         env:
           PIOT_E2E_PUBLISH: ${{ steps.mode.outputs.publish }}
-          # No long-lived registry tokens. npm OIDC trusted publishing
-          # is the only auth path the canary exercises — matches what
+          # No long-lived registry tokens. OIDC trusted publishing is
+          # the only auth path the e2e suite exercises — matches what
           # the public reusable workflow does.
-        run: pnpm run test:e2e
+        run: pnpm exec vitest run --config test/e2e/vitest.e2e.config.ts test/e2e/${{ matrix.fixture }}.e2e.test.ts
+
+  e2e-cli-surface:
+    # Cross-cutting CLI-surface tests that aren't fixture-specific
+    # (e.g. pkg.path absolutization). Run once, not per-fixture.
+    name: e2e (cli-surface)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CLI
+        run: pnpm run build
+
+      - name: Run cli-surface e2e
+        run: pnpm exec vitest run --config test/e2e/vitest.e2e.config.ts test/e2e/pkg-path-absolutization.e2e.test.ts
