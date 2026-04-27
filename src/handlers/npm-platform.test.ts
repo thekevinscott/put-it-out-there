@@ -222,6 +222,48 @@ describe('publishPlatforms (bundled-cli)', () => {
     expect(stagingPkgJsons).toHaveLength(1);
     expect(stagingPkgJsons[0]!.main).toBe('demo-cli');
   });
+
+  it('propagates repository/license/homepage from main package.json', async () => {
+    // npm provenance verifier rejects the platform tarball with E422 when
+    // package.json.repository.url is empty but the sigstore bundle binds
+    // the publishing GitHub repo. Ensure synthesized platform packages
+    // inherit identity fields from the main package.
+    writeFileSync(
+      join(repo, 'pkg', 'package.json'),
+      JSON.stringify({
+        name: 'demo-cli',
+        version: '0.0.0',
+        license: 'MIT',
+        homepage: 'https://example.com',
+        repository: { type: 'git', url: 'git+https://github.com/acme/demo-cli.git' },
+      }, null, 2),
+    );
+    mkdirSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu'), { recursive: true });
+    writeFileSync(join(artifactsRoot, 'demo-cli-linux-x64-gnu', 'demo-cli'), Buffer.from('x'));
+
+    const stagingPkgJsons: Record<string, unknown>[] = [];
+    execMock.mockImplementation((_cmd, args, opts) => {
+      const a = args as string[];
+      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
+      const cwd = (opts as { cwd?: string } | undefined)?.cwd;
+      if (cwd) {
+        stagingPkgJsons.push(JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8')) as Record<string, unknown>);
+      }
+      return Buffer.from('');
+    });
+
+    const pkg: PlatformPkg = basePkg({
+      build: 'bundled-cli',
+      targets: ['linux-x64-gnu'],
+    });
+    await publishPlatforms(pkg, '0.2.0', makeCtx());
+    expect(stagingPkgJsons[0]!.license).toBe('MIT');
+    expect(stagingPkgJsons[0]!.homepage).toBe('https://example.com');
+    expect(stagingPkgJsons[0]!.repository).toEqual({
+      type: 'git',
+      url: 'git+https://github.com/acme/demo-cli.git',
+    });
+  });
 });
 
 describe('publishPlatforms + scoped main package', () => {

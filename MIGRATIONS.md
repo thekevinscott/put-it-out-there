@@ -21,6 +21,39 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Synthesized npm platform packages inherit `repository`/`license`/`homepage`
+
+**Summary.** npm's provenance verifier rejected platform-package tarballs
+with `E422 Error verifying sigstore provenance bundle: Failed to validate
+repository information: package.json: "repository.url" is ""`. The
+synthesizer in `src/handlers/npm-platform.ts` previously wrote only
+`name`/`version`/`os`/`cpu`/`files`/`main`/`libc` into the per-target
+`package.json`. The publishing GitHub repo URL is bound into the
+sigstore bundle by `npm publish --provenance`; npm cross-checks it
+against `package.json.repository.url` at upload time, so an empty value
+fails verification. Identity fields (`repository`, `license`, `homepage`)
+are now read from the main package's `package.json` and copied into each
+synthesized platform package. Affects `build = "napi"` and
+`build = "bundled-cli"` packages.
+
+**Required changes.** None — the fix is automatic. To benefit, ensure
+the main package's `package.json` declares a `repository.url` that
+matches the publishing repo (npm provenance has always required this for
+the main package; platform packages now share the same expectation).
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Per-target platform tarballs
+on the registry now carry the same `repository`/`license`/`homepage`
+values as the main package, instead of being absent.
+
+**Verification.** A `build = "napi"` or `build = "bundled-cli"` package
+publishes its platform tarballs to npm without `E422` provenance errors.
+`npm view <pkg>-<target>@<version> repository` returns the main
+package's repository URL.
+
+---
+
 ### Reusable workflow's npm build step forces `shell: bash`
 
 **Summary.** The build matrix can target Windows runners. GitHub Actions

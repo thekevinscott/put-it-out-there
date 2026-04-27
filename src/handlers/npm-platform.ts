@@ -139,6 +139,14 @@ function synthesizePlatformPackage(
   const { os, cpu, libc } = targetToOsCpu(target);
   const fileList = readdirSync(staging);
 
+  // npm provenance verifier compares package.json.repository.url against
+  // the publishing GitHub repo URL baked into the sigstore bundle. A
+  // synthesized platform package without `repository` fails with E422
+  // "repository.url is \"\"". Inherit repository/license/homepage from
+  // the main package so per-platform tarballs validate.
+  const mainPkgRaw = readFileSync(join(pkg.path, 'package.json'), 'utf8');
+  const mainPkg = JSON.parse(mainPkgRaw) as Record<string, unknown>;
+
   const platformJson: Record<string, unknown> = {
     name: platformName,
     version,
@@ -147,6 +155,9 @@ function synthesizePlatformPackage(
     files: fileList,
     main: pickMainFile(fileList, pkg.build),
     ...(libc !== undefined ? { libc } : {}),
+    ...(mainPkg['repository'] !== undefined ? { repository: mainPkg['repository'] } : {}),
+    ...(mainPkg['license'] !== undefined ? { license: mainPkg['license'] } : {}),
+    ...(mainPkg['homepage'] !== undefined ? { homepage: mainPkg['homepage'] } : {}),
   };
   writeFileSync(
     join(staging, 'package.json'),
