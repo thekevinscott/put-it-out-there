@@ -6,49 +6,29 @@ name: putitoutthere release
 #
 #   on:
 #     push: { branches: [main] }
-#     workflow_dispatch:
-#       inputs:
-#         dry_run: { type: boolean, default: false }
 #
 #   jobs:
 #     release:
 #       uses: thekevinscott/putitoutthere/.github/workflows/release.yml@v1
-#       with:
-#         dry_run: ${{ inputs.dry_run || false }}
-#       secrets: inherit
 #       permissions:
 #         contents: write
 #         id-token: write
 #
-# That is the entire surface a consumer touches.
+# That is the entire surface a consumer touches. `putitoutthere.toml`
+# at the repo root is the config; nothing about that is configurable.
 #
-# Engine version is pinned inside this file (PIOT_ENGINE_VERSION env on each
-# step that invokes the CLI). Bumping the engine = bumping that pin and
-# moving the v<major> floating tag. Consumers do not pick the engine version.
+# Auth: OIDC trusted publishers on all three registries (crates.io,
+# PyPI, npm). Long-lived registry tokens are explicitly NOT supported
+# via this workflow — register a trusted publisher per registry once,
+# then publishes are zero-secret. See docs/guide/auth.md.
+#
+# The `uses: thekevinscott/putitoutthere@v1` calls inside this file
+# resolve to the same git ref the workflow itself was loaded from, so
+# the workflow + engine always agree on a single version.
 
 on:
   workflow_call:
     inputs:
-      dry_run:
-        description: >-
-          Compute the release plan but skip publish, tag, and GitHub Release
-          creation. Build still runs so consumers can validate the matrix +
-          per-target build steps before flipping to a real release.
-        type: boolean
-        default: false
-      working_directory:
-        description: >-
-          Path to the directory containing your putitoutthere config,
-          relative to the repo root. Default `.` (root). Useful for repos
-          where putitoutthere lives under a subdir.
-        type: string
-        default: '.'
-      config:
-        description: >-
-          Config filename, resolved relative to `working_directory`.
-          Default `putitoutthere.toml`.
-        type: string
-        default: 'putitoutthere.toml'
       environment:
         description: >-
           GitHub deployment environment to gate the publish job. Required-
@@ -58,40 +38,20 @@ on:
         default: 'release'
       node_version:
         description: >-
-          Node version for plan / publish runners and for kind = "npm" build
-          steps. Default `20` (LTS).
+          Node version for plan / publish runners and for kind = "npm"
+          build steps. Default `24`.
         type: string
-        default: '20'
+        default: '24'
       python_version:
         description: >-
           Python version for kind = "pypi" build / publish steps. Default
           `3.12`.
         type: string
         default: '3.12'
-    secrets:
-      NPM_TOKEN:
-        description: >-
-          npm classic / granular token. Optional — OIDC trusted publishing is
-          preferred. Falls back to env-var auth when set.
-        required: false
-      PYPI_API_TOKEN:
-        description: >-
-          PyPI API token. Optional — OIDC is preferred. Falls back when set.
-        required: false
-      CARGO_REGISTRY_TOKEN:
-        description: >-
-          crates.io API token. Optional — OIDC via
-          `rust-lang/crates-io-auth-action` is preferred. Falls back when set.
-        required: false
 
 concurrency:
   group: putitoutthere-release-${{ github.repository }}
   cancel-in-progress: false
-
-env:
-  # Engine version pin. Bumping the engine = bumping this string and
-  # moving the v<major> floating tag in this repo.
-  PIOT_ENGINE_VERSION: '0.1.43'
 
 jobs:
   plan:
@@ -108,19 +68,9 @@ jobs:
           node-version: ${{ inputs.node_version }}
 
       - id: plan
-        name: putitoutthere plan
-        run: |
-          set -euo pipefail
-          npx -y "putitoutthere@${PIOT_ENGINE_VERSION}" plan \
-            --cwd '${{ inputs.working_directory }}' \
-            --config '${{ inputs.config }}' \
-            --json | tee plan.json
-          test -s plan.json
-          {
-            printf 'matrix<<PIOT_MATRIX_EOF\n'
-            cat plan.json
-            printf '\nPIOT_MATRIX_EOF\n'
-          } >> "$GITHUB_OUTPUT"
+        uses: thekevinscott/putitoutthere@v1
+        with:
+          command: plan
 
   build:
     needs: plan
@@ -232,31 +182,15 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: putitoutthere publish
-        env:
-          # NODE_AUTH_TOKEN matches the .npmrc template setup-node writes.
-          # NPM_TOKEN is accepted as an alias by the engine.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          set -euo pipefail
-          DRY_RUN_FLAG=""
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            DRY_RUN_FLAG="--dry-run"
-          fi
-          npx -y "putitoutthere@${PIOT_ENGINE_VERSION}" publish \
-            --cwd '${{ inputs.working_directory }}' \
-            --config '${{ inputs.config }}' \
-            $DRY_RUN_FLAG
+      - uses: thekevinscott/putitoutthere@v1
+        with:
+          command: publish
 
       # The engine creates annotated git tags + pushes to PyPI / npm /
       # crates.io but does NOT cut GitHub Releases. Backfill that here so
       # the project's /releases page tracks the tag history. Auto-generated
       # notes pull PR titles between this tag and the previous one.
       - name: Create GitHub Release(s) for new tag(s)
-        if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
