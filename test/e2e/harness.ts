@@ -87,11 +87,6 @@ export function runPiot(args: readonly string[], cwd: string, env: NodeJS.Proces
   }
 }
 
-/** True when the opt-in env var is set. Gates destructive registry ops. */
-export function shouldActuallyPublish(): boolean {
-  return process.env.PIOT_E2E_PUBLISH === '1';
-}
-
 /**
  * Build real artifacts for the canary packages and stage them under
  * `{repo.cwd}/artifacts/{artifact_name}/`, matching the shape that
@@ -103,7 +98,7 @@ export function shouldActuallyPublish(): boolean {
  *   straight from the source tree, so no staging needed.
  *
  * Runs on demand (not from makeE2ERepo) because the build tools aren't
- * needed for plan/dry-run paths and we don't want to slow those down.
+ * needed for plan-only paths and we don't want to slow those down.
  */
 export function stageArtifacts(repo: E2ERepo): void {
   const artifactsRoot = join(repo.cwd, 'artifacts');

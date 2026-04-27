@@ -125,9 +125,6 @@ async function publishImpl(
   if (await isPublishedImpl(pkg, version, ctx)) {
     return { status: 'already-published' };
   }
-  if (ctx.dryRun) {
-    return { status: 'skipped' };
-  }
 
   const files = collectArtifacts(pkg.name, ctx.artifactsRoot);
   if (files.length === 0) {

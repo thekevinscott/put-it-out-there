@@ -173,10 +173,10 @@ globs = ["packages/ts/**"]
     expect(stdoutChunks.join('')).toMatch(/no packages to release/);
   });
 
-  it('publishes in dry-run mode', async () => {
-    const stdoutChunks: string[] = [];
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+  it('throws when --dry-run is passed (removed in #244)', async () => {
+    const stderrChunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
       return true;
     });
     const code = await run([
@@ -187,9 +187,8 @@ globs = ["packages/ts/**"]
       repo,
       '--dry-run',
     ]);
-    // publish exits 1 here because preflight fails (no NODE_AUTH_TOKEN);
-    // we're just exercising the code path.
-    expect([0, 1]).toContain(code);
+    expect(code).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/--dry-run was removed/);
   });
 
   it('publishes prints published list when plan is empty', async () => {

@@ -42,7 +42,6 @@ let artifactsRoot: string;
 function makeCtx(over: Partial<Ctx> = {}): Ctx {
   return {
     cwd: repo,
-    dryRun: false,
     log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     env: {},
     artifacts: { get: () => '', has: () => false },
@@ -195,18 +194,6 @@ describe('publishPlatforms (napi)', () => {
     expect(calls).toBeGreaterThan(0);
   });
 
-  it('dry-run lists platforms but does not invoke npm publish', async () => {
-    execMock.mockImplementation((_cmd, args) => {
-      const a = args as string[];
-      if (a[0] === 'view') throw Object.assign(new Error('E404'), { status: 1, stderr: Buffer.from('404') });
-      throw new Error('publish should not be called in dry-run');
-    });
-    const r = await publishPlatforms(basePkg(), '0.2.0', makeCtx({ dryRun: true }));
-    expect(r.skipped).toEqual(['demo-cli-linux-x64-gnu', 'demo-cli-darwin-arm64']);
-    expect(r.published).toEqual([]);
-    const pkgJson = JSON.parse(readFileSync(join(repo, 'pkg', 'package.json'), 'utf8')) as Record<string, unknown>;
-    expect(pkgJson.optionalDependencies).toBeUndefined();
-  });
 });
 
 describe('publishPlatforms (bundled-cli)', () => {

@@ -2,8 +2,9 @@
  * E2E for `python-pure-sdist-only` — sdist-only path (no wheel
  * emitted). Different artifact set on the wire from setuptools+wheel.
  *
- * Plan + dry-run only until a trusted publisher exists for
- * `piot-fixture-zzz-python-sdist` on TestPyPI (issue #244 step 2).
+ * Until a trusted publisher is registered for
+ * `piot-fixture-zzz-python-sdist` on TestPyPI (#244 step 2), this
+ * fails — by design.
  */
 
 import { rmSync } from 'node:fs';
@@ -21,19 +22,18 @@ afterEach(() => {
   rmSync(repo.cwd, { recursive: true, force: true });
 });
 
-describe('e2e: python-pure-sdist-only plan', () => {
-  it('emits 1 pypi row', () => {
-    const out = runPiot(['plan', '--json'], repo.cwd);
-    const matrix = JSON.parse(out.trim()) as Array<{ kind: string }>;
-    expect(matrix).toHaveLength(1);
-    expect(matrix[0]!.kind).toBe('pypi');
-  });
-});
-
-describe('e2e: python-pure-sdist-only publish --dry-run', () => {
-  it('runs without side effects', () => {
-    const out = runPiot(['publish', '--dry-run', '--json'], repo.cwd);
-    const result = JSON.parse(out.trim()) as { ok: boolean; published: unknown[] };
+describe('e2e: python-pure-sdist-only', () => {
+  it('publishes piot-fixture-zzz-python-sdist to TestPyPI via OIDC', () => {
+    const out = runPiot(['publish', '--json'], repo.cwd);
+    const result = JSON.parse(out.trim()) as {
+      ok: boolean;
+      published: Array<{ package: string; version: string; result: { status: string } }>;
+    };
     expect(result.ok).toBe(true);
+    expect(result.published).toHaveLength(1);
+    const entry = result.published[0]!;
+    expect(entry.package).toBe('piot-fixture-zzz-python-sdist');
+    expect(entry.version).toBe(repo.version);
+    expect(entry.result.status).toMatch(/^(published|already-published)$/);
   });
 });

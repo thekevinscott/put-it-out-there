@@ -4,9 +4,9 @@
  * #2). Mirrors the dirsql shape: rust crate → python wheels (maturin)
  * + npm bundled-cli (rust binary).
  *
- * Plan + dry-run only until trusted publishers exist for the full
- * `-rust` + `-python` + `-cli` (+5 platform sub-pkgs) set across all
- * three registries (issue #244 step 2).
+ * Until trusted publishers are registered for the full
+ * `-rust` + `-python` + `-cli` (+5 platform sub-pkgs) set across
+ * crates.io, TestPyPI, and npm (#244 step 2), this fails — by design.
  */
 
 import { rmSync } from 'node:fs';
@@ -24,23 +24,24 @@ afterEach(() => {
   rmSync(repo.cwd, { recursive: true, force: true });
 });
 
-describe('e2e: polyglot-everything plan', () => {
-  it('emits 1 crates + 6 pypi + 6 npm rows', () => {
-    const out = runPiot(['plan', '--json'], repo.cwd);
-    const matrix = JSON.parse(out.trim()) as Array<{ name: string; kind: string }>;
-    expect(matrix).toHaveLength(13);
-    const byKind = new Map<string, number>();
-    for (const r of matrix) byKind.set(r.kind, (byKind.get(r.kind) ?? 0) + 1);
-    expect(byKind.get('crates')).toBe(1);
-    expect(byKind.get('pypi')).toBe(6);
-    expect(byKind.get('npm')).toBe(6);
-  });
-});
-
-describe('e2e: polyglot-everything publish --dry-run', () => {
-  it('runs without side effects', () => {
-    const out = runPiot(['publish', '--dry-run', '--json'], repo.cwd);
-    const result = JSON.parse(out.trim()) as { ok: boolean; published: unknown[] };
+describe('e2e: polyglot-everything', () => {
+  it('publishes -rust + -python + -cli across all 3 registries via OIDC', () => {
+    const out = runPiot(['publish', '--json'], repo.cwd);
+    const result = JSON.parse(out.trim()) as {
+      ok: boolean;
+      published: Array<{ package: string; version: string; result: { status: string } }>;
+    };
     expect(result.ok).toBe(true);
+    expect(result.published).toHaveLength(3);
+    const names = result.published.map((p) => p.package).sort();
+    expect(names).toEqual([
+      'piot-fixture-zzz-cli',
+      'piot-fixture-zzz-python',
+      'piot-fixture-zzz-rust',
+    ]);
+    for (const entry of result.published) {
+      expect(entry.version).toBe(repo.version);
+      expect(entry.result.status).toMatch(/^(published|already-published)$/);
+    }
   });
 });

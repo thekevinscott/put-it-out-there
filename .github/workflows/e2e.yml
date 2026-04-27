@@ -1,36 +1,25 @@
 name: E2E
 
 # Per-fixture e2e matrix. One job per distinct publish-path
-# manifestation; each runs `plan` + `publish --dry-run` against its
-# fixture, and the `js-vanilla` (live canary) job additionally runs a
-# real `npm publish` via OIDC trusted publishing on every PR + push
-# to main. As trusted publishers are registered for the other
-# fixtures (#244 step 2), each fixture's e2e file gains its own live
-# block and joins the canary as a real-publish gate.
+# manifestation; each fixture's job runs a real `publish` via OIDC
+# trusted publishing on every PR + push to main. Throwaway
+# `0.0.{unix_seconds}` versions, no long-lived registry tokens.
+#
+# Until trusted publishers are registered for each fixture's package
+# names (#244 step 2), the corresponding job fails — by design. The
+# failure is the signal that the publisher still needs to be wired.
 #
 # Why publish on PRs and not just on main: catching publish-side
 # breakage post-merge (release-npm.yml run 24972181242 — ENEEDAUTH
-# from `npm publish --provenance`) is too late. The bug is already
-# in `main` by the time we find out. Running the live publish on PR
-# CI shifts that detection left so a broken OIDC path blocks the
-# merge instead of breaking the next real release.
-#
-# Triggers:
-# - pull_request           → live canary publish + dry-run others.
-# - push to main           → live canary publish + dry-run others.
-# - workflow_dispatch      → live canary publish unless caller passes
-#                            `publish: false` to opt out.
+# from `npm publish --provenance`) is too late. Running the live
+# publish on PR CI shifts that detection left so a broken OIDC path
+# blocks the merge instead of breaking the next real release.
 
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      publish:
-        description: "Publish canary version to npm (uncheck for dry-run only)"
-        type: boolean
-        default: true
 
 concurrency:
   group: e2e-${{ github.ref }}
@@ -73,41 +62,22 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Decide publish mode
-        id: mode
-        # pull_request / push → publish=1.
-        # workflow_dispatch   → publish=inputs.publish (default true).
-        # `inputs.publish` is unset on non-dispatch events, so the
-        # `!= 'false'` check defaults to publish=1 for those.
-        run: |
-          if [ "${{ inputs.publish }}" = "false" ]; then
-            echo "publish=0" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=1" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Build CLI
         run: pnpm run build
 
       - name: Run e2e for ${{ matrix.fixture }}
-        env:
-          PIOT_E2E_PUBLISH: ${{ steps.mode.outputs.publish }}
-          # No long-lived registry tokens. OIDC trusted publishing is
-          # the only auth path the e2e suite exercises — matches what
-          # the public reusable workflow does.
+        # No long-lived registry tokens. OIDC trusted publishing is the
+        # only auth path the e2e suite exercises — matches what the
+        # public reusable workflow does.
         run: pnpm exec vitest run --config test/e2e/vitest.e2e.config.ts test/e2e/${{ matrix.fixture }}.e2e.test.ts
 
   e2e-cli-surface:
     # Cross-cutting CLI-surface tests that aren't fixture-specific
     # (e.g. pkg.path absolutization). Run once, not per-fixture.
-    # `id-token: write` is required for the same reason the matrix
-    # jobs need it: `publish --dry-run` pre-flights the OIDC auth
-    # path and fails closed if no OIDC env is present.
     name: e2e (cli-surface)
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:

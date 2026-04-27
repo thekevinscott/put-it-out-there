@@ -1,12 +1,12 @@
 /**
- * E2E for `js-bundled-cli` — same N+1 family pattern as napi, but the
+ * E2E for `js-bundled-cli` — same N+1 pattern as napi, but the
  * top-level is a thin launcher script that picks the right platform
  * binary at runtime instead of `optionalDependencies`. ruff/uv/biome
  * ship this shape.
  *
- * Plan + dry-run only until trusted publishers exist for
- * `piot-fixture-zzz-js-bundled` and its 5 platform sub-packages
- * (issue #244 step 2).
+ * Until trusted publishers are registered for
+ * `piot-fixture-zzz-js-bundled` + its 5 platform sub-packages
+ * (#244 step 2), this fails — by design.
  */
 
 import { rmSync } from 'node:fs';
@@ -24,20 +24,18 @@ afterEach(() => {
   rmSync(repo.cwd, { recursive: true, force: true });
 });
 
-describe('e2e: js-bundled-cli plan', () => {
-  it('emits 1 main + 5 platform rows', () => {
-    const out = runPiot(['plan', '--json'], repo.cwd);
-    const matrix = JSON.parse(out.trim()) as Array<{ name: string; kind: string; target: string }>;
-    expect(matrix).toHaveLength(6);
-    expect(matrix.every((r) => r.kind === 'npm')).toBe(true);
-    expect(matrix.filter((r) => r.target === 'main')).toHaveLength(1);
-  });
-});
-
-describe('e2e: js-bundled-cli publish --dry-run', () => {
-  it('runs without side effects', () => {
-    const out = runPiot(['publish', '--dry-run', '--json'], repo.cwd);
-    const result = JSON.parse(out.trim()) as { ok: boolean; published: unknown[] };
+describe('e2e: js-bundled-cli', () => {
+  it('publishes piot-fixture-zzz-js-bundled (+5 platform sub-pkgs) to npm via OIDC', () => {
+    const out = runPiot(['publish', '--json'], repo.cwd);
+    const result = JSON.parse(out.trim()) as {
+      ok: boolean;
+      published: Array<{ package: string; version: string; result: { status: string } }>;
+    };
     expect(result.ok).toBe(true);
+    expect(result.published).toHaveLength(1);
+    const entry = result.published[0]!;
+    expect(entry.package).toBe('piot-fixture-zzz-js-bundled');
+    expect(entry.version).toBe(repo.version);
+    expect(entry.result.status).toMatch(/^(published|already-published)$/);
   });
 });

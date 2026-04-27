@@ -94,18 +94,6 @@ describe('publish: happy path', () => {
     expect(result.published.map((p) => p.package)).toEqual(['lib-js']);
   });
 
-  it('dry-run: skips handler.publish and does not tag', async () => {
-    const handler = makeHandler();
-    const result = await publish({
-      cwd: repo,
-      handlerFor: () => handler,
-      dryRun: true,
-    });
-    expect(handler.publish).not.toHaveBeenCalled();
-    expect(git(['tag', '-l'])).toBe('');
-    expect(result.ok).toBe(true);
-  });
-
   it('short-circuits on already-published (no tag, clean exit)', async () => {
     const handler = makeHandler({
       isPublished: vi.fn().mockResolvedValue(true),

@@ -3,8 +3,8 @@
  * `rust-lang/crates-io-auth-action@v1` + `cargo publish`. Distinct
  * code path from npm and pypi OIDC.
  *
- * Plan + dry-run only until a trusted publisher exists for
- * `piot-fixture-zzz-rust` on crates.io (issue #244 step 2).
+ * Until a trusted publisher is registered for `piot-fixture-zzz-rust`
+ * on crates.io (#244 step 2), this fails — by design.
  */
 
 import { rmSync } from 'node:fs';
@@ -22,20 +22,18 @@ afterEach(() => {
   rmSync(repo.cwd, { recursive: true, force: true });
 });
 
-describe('e2e: rust-crate-only plan', () => {
-  it('emits 1 crates row', () => {
-    const out = runPiot(['plan', '--json'], repo.cwd);
-    const matrix = JSON.parse(out.trim()) as Array<{ kind: string; target: string }>;
-    expect(matrix).toHaveLength(1);
-    expect(matrix[0]!.kind).toBe('crates');
-    expect(matrix[0]!.target).toBe('noarch');
-  });
-});
-
-describe('e2e: rust-crate-only publish --dry-run', () => {
-  it('runs without side effects', () => {
-    const out = runPiot(['publish', '--dry-run', '--json'], repo.cwd);
-    const result = JSON.parse(out.trim()) as { ok: boolean; published: unknown[] };
+describe('e2e: rust-crate-only', () => {
+  it('publishes piot-fixture-zzz-rust to crates.io via OIDC', () => {
+    const out = runPiot(['publish', '--json'], repo.cwd);
+    const result = JSON.parse(out.trim()) as {
+      ok: boolean;
+      published: Array<{ package: string; version: string; result: { status: string } }>;
+    };
     expect(result.ok).toBe(true);
+    expect(result.published).toHaveLength(1);
+    const entry = result.published[0]!;
+    expect(entry.package).toBe('piot-fixture-zzz-rust');
+    expect(entry.version).toBe(repo.version);
+    expect(entry.result.status).toMatch(/^(published|already-published)$/);
   });
 });

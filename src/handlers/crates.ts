@@ -10,7 +10,7 @@
  *   alternative (TOML round-trip) loses formatting.
  * - publish: `cargo publish --allow-dirty --verbose` with stderr
  *   captured for the failure dump. Short-circuits on
- *   already-published (idempotent). Honors ctx.dryRun.
+ *   already-published (idempotent).
  *
  * --allow-dirty is required for our writeVersion-then-publish model
  * (#135), but cargo's default dirty-check is exactly the safety net
@@ -92,9 +92,6 @@ async function publishImpl(
 ): Promise<PublishResult> {
   if (await isPublishedImpl(pkg, version, ctx)) {
     return { status: 'already-published' };
-  }
-  if (ctx.dryRun) {
-    return { status: 'skipped' };
   }
 
   // #135: --allow-dirty disarms cargo's own "is the tree clean?" guard.

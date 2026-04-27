@@ -1,12 +1,12 @@
 /**
  * E2E for `js-napi` — napi platform-family synthesis: per-triple
  * sub-packages + top-level with `optionalDependencies` pinning them.
- * Multi-publish + optionalDeps rewrite is non-trivial; dirsql ships
+ * Multi-publish + optionalDeps rewrite, end-to-end. dirsql ships
  * this shape.
  *
- * Plan + dry-run only until trusted publishers exist for
- * `piot-fixture-zzz-js-napi` and its 5 platform sub-packages
- * (issue #244 step 2).
+ * Until trusted publishers are registered for `piot-fixture-zzz-js-napi`
+ * + its 5 platform sub-packages (#244 step 2), this fails — by design;
+ * the failure is the signal to wire the publisher.
  */
 
 import { rmSync } from 'node:fs';
@@ -24,20 +24,18 @@ afterEach(() => {
   rmSync(repo.cwd, { recursive: true, force: true });
 });
 
-describe('e2e: js-napi plan', () => {
-  it('emits 1 main + 5 platform rows', () => {
-    const out = runPiot(['plan', '--json'], repo.cwd);
-    const matrix = JSON.parse(out.trim()) as Array<{ name: string; kind: string; target: string }>;
-    expect(matrix).toHaveLength(6);
-    expect(matrix.every((r) => r.kind === 'npm')).toBe(true);
-    expect(matrix.filter((r) => r.target === 'main')).toHaveLength(1);
-  });
-});
-
-describe('e2e: js-napi publish --dry-run', () => {
-  it('runs without side effects', () => {
-    const out = runPiot(['publish', '--dry-run', '--json'], repo.cwd);
-    const result = JSON.parse(out.trim()) as { ok: boolean; published: unknown[] };
+describe('e2e: js-napi', () => {
+  it('publishes piot-fixture-zzz-js-napi (+5 platform sub-pkgs) to npm via OIDC', () => {
+    const out = runPiot(['publish', '--json'], repo.cwd);
+    const result = JSON.parse(out.trim()) as {
+      ok: boolean;
+      published: Array<{ package: string; version: string; result: { status: string } }>;
+    };
     expect(result.ok).toBe(true);
+    expect(result.published).toHaveLength(1);
+    const entry = result.published[0]!;
+    expect(entry.package).toBe('piot-fixture-zzz-js-napi');
+    expect(entry.version).toBe(repo.version);
+    expect(entry.result.status).toMatch(/^(published|already-published)$/);
   });
 });

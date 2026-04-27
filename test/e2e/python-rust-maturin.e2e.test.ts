@@ -3,8 +3,9 @@
  * maturin. The most complex per-build of the e2e set; the shape
  * consumers will hit hardest if the maturin path breaks.
  *
- * Plan + dry-run only until a trusted publisher exists for
- * `piot-fixture-zzz-python-maturin` on TestPyPI (issue #244 step 2).
+ * Until a trusted publisher is registered for
+ * `piot-fixture-zzz-python-maturin` on TestPyPI (#244 step 2), this
+ * fails — by design.
  */
 
 import { rmSync } from 'node:fs';
@@ -22,20 +23,18 @@ afterEach(() => {
   rmSync(repo.cwd, { recursive: true, force: true });
 });
 
-describe('e2e: python-rust-maturin plan', () => {
-  it('emits 5 wheels + 1 sdist', () => {
-    const out = runPiot(['plan', '--json'], repo.cwd);
-    const matrix = JSON.parse(out.trim()) as Array<{ kind: string; target: string }>;
-    expect(matrix).toHaveLength(6);
-    expect(matrix.every((r) => r.kind === 'pypi')).toBe(true);
-    expect(matrix.filter((r) => r.target === 'sdist')).toHaveLength(1);
-  });
-});
-
-describe('e2e: python-rust-maturin publish --dry-run', () => {
-  it('runs without side effects', () => {
-    const out = runPiot(['publish', '--dry-run', '--json'], repo.cwd);
-    const result = JSON.parse(out.trim()) as { ok: boolean; published: unknown[] };
+describe('e2e: python-rust-maturin', () => {
+  it('publishes piot-fixture-zzz-python-maturin (5 wheels + sdist) to TestPyPI via OIDC', () => {
+    const out = runPiot(['publish', '--json'], repo.cwd);
+    const result = JSON.parse(out.trim()) as {
+      ok: boolean;
+      published: Array<{ package: string; version: string; result: { status: string } }>;
+    };
     expect(result.ok).toBe(true);
+    expect(result.published).toHaveLength(1);
+    const entry = result.published[0]!;
+    expect(entry.package).toBe('piot-fixture-zzz-python-maturin');
+    expect(entry.version).toBe(repo.version);
+    expect(entry.result.status).toMatch(/^(published|already-published)$/);
   });
 });

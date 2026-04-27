@@ -3,9 +3,10 @@
  * npm package with no Rust between them. Exercises the cross-language
  * publish path without any native build.
  *
- * Plan + dry-run only until trusted publishers exist for
- * `piot-fixture-zzz-python-no-rust` and `piot-fixture-zzz-js-no-rust`
- * (issue #244 step 2).
+ * Until trusted publishers are registered for
+ * `piot-fixture-zzz-python-no-rust` (TestPyPI) and
+ * `piot-fixture-zzz-js-no-rust` (npm) (#244 step 2), this fails —
+ * by design.
  */
 
 import { rmSync } from 'node:fs';
@@ -23,22 +24,20 @@ afterEach(() => {
   rmSync(repo.cwd, { recursive: true, force: true });
 });
 
-describe('e2e: js-python-no-rust plan', () => {
-  it('emits 1 pypi + 1 npm row', () => {
-    const out = runPiot(['plan', '--json'], repo.cwd);
-    const matrix = JSON.parse(out.trim()) as Array<{ name: string; kind: string }>;
-    expect(matrix).toHaveLength(2);
-    const byKind = new Map<string, number>();
-    for (const r of matrix) byKind.set(r.kind, (byKind.get(r.kind) ?? 0) + 1);
-    expect(byKind.get('pypi')).toBe(1);
-    expect(byKind.get('npm')).toBe(1);
-  });
-});
-
-describe('e2e: js-python-no-rust publish --dry-run', () => {
-  it('runs without side effects', () => {
-    const out = runPiot(['publish', '--dry-run', '--json'], repo.cwd);
-    const result = JSON.parse(out.trim()) as { ok: boolean; published: unknown[] };
+describe('e2e: js-python-no-rust', () => {
+  it('publishes 1 pypi + 1 npm package via OIDC', () => {
+    const out = runPiot(['publish', '--json'], repo.cwd);
+    const result = JSON.parse(out.trim()) as {
+      ok: boolean;
+      published: Array<{ package: string; version: string; result: { status: string } }>;
+    };
     expect(result.ok).toBe(true);
+    expect(result.published).toHaveLength(2);
+    const names = result.published.map((p) => p.package).sort();
+    expect(names).toEqual(['piot-fixture-zzz-js-no-rust', 'piot-fixture-zzz-python-no-rust']);
+    for (const entry of result.published) {
+      expect(entry.version).toBe(repo.version);
+      expect(entry.result.status).toMatch(/^(published|already-published)$/);
+    }
   });
 });

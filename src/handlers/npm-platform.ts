@@ -59,10 +59,6 @@ export async function publishPlatforms(
       skipped.push(platformName);
       continue;
     }
-    if (ctx.dryRun) {
-      skipped.push(platformName);
-      continue;
-    }
     const stagingDir = synthesizePlatformPackage(pkg, target, version, ctx);
     try {
       npmPublish(stagingDir, pkg, ctx);
@@ -73,9 +69,7 @@ export async function publishPlatforms(
     }
   }
 
-  if (!ctx.dryRun) {
-    rewriteOptionalDependencies(pkg, version, [...published, ...skipped]);
-  }
+  rewriteOptionalDependencies(pkg, version, [...published, ...skipped]);
 
   return { published, skipped };
 }

@@ -31,7 +31,6 @@ const execMock = vi.mocked(execFileSync);
 function makeCtx(over: Partial<Ctx> = {}): Ctx {
   return {
     cwd: '.',
-    dryRun: false,
     log: {
       debug: () => {},
       info: () => {},
@@ -433,20 +432,6 @@ describe('crates.publish', () => {
     expect(envSpec.UNRELATED_AWS_SECRET).toBeUndefined();
 
     delete process.env.UNRELATED_AWS_SECRET;
-    fetchSpy.mockRestore();
-  });
-
-  it('skips the network when ctx.dryRun is set', async () => {
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
-      new Response('{}', { status: 404 }),
-    );
-    const result = await crates.publish(
-      { ...basePkg(), path: dir },
-      '0.1.0',
-      makeCtx({ cwd: dir, dryRun: true }),
-    );
-    expect(result.status).toBe('skipped');
-    expect(execMock).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
 
