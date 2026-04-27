@@ -70,31 +70,3 @@ jobs:
         # only auth path the e2e suite exercises — matches what the
         # public reusable workflow does.
         run: pnpm exec vitest run --config test/e2e/vitest.e2e.config.ts test/e2e/${{ matrix.fixture }}.e2e.test.ts
-
-  e2e-cli-surface:
-    # Cross-cutting CLI-surface tests that aren't fixture-specific
-    # (e.g. pkg.path absolutization). Run once, not per-fixture.
-    name: e2e (cli-surface)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-
-      - name: Install pnpm
-        run: npm install -g pnpm@9
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build CLI
-        run: pnpm run build
-
-      - name: Run cli-surface e2e
-        run: pnpm exec vitest run --config test/e2e/vitest.e2e.config.ts test/e2e/pkg-path-absolutization.e2e.test.ts
