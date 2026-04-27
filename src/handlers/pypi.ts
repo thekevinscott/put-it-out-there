@@ -158,7 +158,7 @@ async function publishImpl(
   );
 
   try {
-    execFileSync('twine', ['upload', '--non-interactive', '--disable-progress-bar', ...files], {
+    execFileSync('twine', ['upload', '--non-interactive', '--disable-progress-bar', '--verbose', ...files], {
       cwd: ctx.cwd,
       // #138: minimal env. Don't forward the whole parent process.env
       // to twine.

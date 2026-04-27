@@ -342,6 +342,35 @@ describe('pypi.publish', () => {
     fetchSpy.mockRestore();
   });
 
+  it('runs twine upload with --verbose so 4xx response bodies surface (#244)', async () => {
+    // Plain `twine upload` returns "400 Bad Request from
+    // https://upload.pypi.org/legacy/" with no body. The actual reason
+    // (filename mismatch, missing trusted-publisher claim, malformed
+    // metadata) only appears under --verbose. Hard-coded so a future
+    // edit can't quietly drop it.
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    const dir = mkdtempSync(join(tmpdir(), 'pypi-verbose-'));
+    writeFileSync(join(dir, 'pyproject.toml'), '[project]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');
+    const artifactsRoot = join(dir, 'artifacts');
+    mkdirSync(join(artifactsRoot, 'demo-sdist'), { recursive: true });
+    writeFileSync(join(artifactsRoot, 'demo-sdist', 'demo-0.1.0.tar.gz'), 'x', 'utf8');
+    execMock.mockReturnValueOnce(Buffer.from(''));
+    await pypi.publish(
+      { name: 'demo', path: dir },
+      '0.1.0',
+      makeCtx({
+        cwd: dir,
+        artifactsRoot,
+        env: { PYPI_API_TOKEN: 'pypi-tok' },
+      }),
+    );
+    const args = execMock.mock.calls[0]![1] as string[];
+    expect(args).toContain('--verbose');
+    fetchSpy.mockRestore();
+  });
+
 
   it('fails loudly when PYPI_API_TOKEN is not set', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
