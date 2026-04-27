@@ -45,6 +45,15 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Fixed
 
+- **Crates publish no longer fails the completeness check.** (#244)
+  `cargo publish` packages and uploads from source on the registry
+  side, so the reusable workflow never produces a `<name>-crate/`
+  artifact directory. The pre-publish completeness check was demanding
+  a `.crate` file that nothing in the pipeline ever creates, which made
+  any consumer with a `kind = "crates"` package fail with
+  `missing artifact directory <name>-crate/` before cargo was ever
+  invoked. Crates rows now skip the completeness check (same reasoning
+  as vanilla npm rows). No config or workflow changes required.
 - **Scaffolded `release.yml` now forwards `GITHUB_TOKEN` to the publish
   step.** piot has cut GitHub Releases alongside tag pushes since #26, but
   Actions doesn't auto-mount the runner token as an env var, so the

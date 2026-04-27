@@ -21,6 +21,31 @@ Each section covers five things, in order:
 
 ## Unreleased
 
+### Crates publish no longer fails the pre-publish completeness check
+
+**Summary.** Consumers with a `kind = "crates"` package previously hit
+`Artifact completeness check failed: missing artifact directory
+<name>-crate/` before cargo was ever invoked. The reusable workflow
+does not upload a `.crate` artifact (cargo packages and uploads from
+source on the registry side), so the file the check demanded never
+existed in the pipeline. The completeness check now skips crates
+rows. Same reasoning as vanilla npm rows, which were already skipped.
+
+**Required changes.** None.
+
+**Deprecations removed.** None.
+
+**Behavior changes without code changes.** Crates publishes that
+previously errored at the completeness gate now reach `cargo publish`.
+A crates row whose source tree is genuinely broken still fails — the
+failure just happens at the cargo step, not before.
+
+**Verification.** A `kind = "crates"` package in
+`putitoutthere.toml` no longer requires any artifact upload step in
+the consumer's workflow. Trigger a release with a `release: patch`
+trailer; the publish job's "Run putitoutthere publish" step should
+log `crates: cargo publish ...` instead of aborting on completeness.
+
 ### `[[package]].paths` renamed to `globs`
 
 **Summary.** The `path` / `paths` pair in `[[package]]` was confusing —
