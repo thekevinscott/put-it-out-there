@@ -100,10 +100,14 @@ jobs:
   e2e-cli-surface:
     # Cross-cutting CLI-surface tests that aren't fixture-specific
     # (e.g. pkg.path absolutization). Run once, not per-fixture.
+    # `id-token: write` is required for the same reason the matrix
+    # jobs need it: `publish --dry-run` pre-flights the OIDC auth
+    # path and fails closed if no OIDC env is present.
     name: e2e (cli-surface)
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
