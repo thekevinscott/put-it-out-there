@@ -73,6 +73,11 @@ jobs:
   pypi-publish:
     needs: e2e
     runs-on: ubuntu-latest
+    # Mirror e2e-fixture.yml's publish job: PyPI TPs registered with
+    # an environment require it on the OIDC `sub` claim. Without this,
+    # the mint exchange returns 422 invalid-publisher even when the
+    # workflow_filename + repo claims match.
+    environment: e2e
     permissions:
       id-token: write
     steps:
