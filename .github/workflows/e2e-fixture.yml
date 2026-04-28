@@ -471,6 +471,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           FIXTURE: ${{ inputs.fixture }}
+          MATRIX: ${{ needs.plan.outputs.matrix }}
         with:
           script: |
             const cp = require('child_process');
@@ -514,6 +515,37 @@ jobs:
             const tree = sh('find fixture-tree -maxdepth 4 -not -path "*/node_modules/*" -not -path "*/.git/*" 2>&1');
             const pkgJsons = sh('find fixture-tree -name package.json -not -path "*/node_modules/*" -not -path "*/.git/*" -exec sh -c \'echo "=== $1 ==="; cat "$1"\' _ {} \\; 2>&1').slice(0, 4000);
             const packs = sh('for d in fixture-tree fixture-tree/packages/*; do if [ -f "$d/package.json" ]; then echo "=== $d (npm pack --dry-run) ==="; (cd "$d" && npm pack --dry-run 2>&1 | head -25); fi; done').slice(0, 4000);
+
+            // Replicate the verify step exactly: for each main/noarch npm
+            // package, fetch the actually-published tarball via `npm view`
+            // and list its contents. If verify says "tarball missing dist/"
+            // but this listing shows dist/ entries, the bug is in verify;
+            // if this listing also shows no dist/, npm publish stripped it.
+            const registry = sh(`
+              set -uo pipefail
+              MATRIX='${process.env.MATRIX || ''}'
+              [ -z "$MATRIX" ] && { echo "(no matrix in env)"; exit 0; }
+              echo "$MATRIX" | jq -c '.[] | select(.kind == "npm" and (.target == "main" or .target == "noarch"))' | while IFS= read -r row; do
+                name=$(echo "$row" | jq -r '.name')
+                version=$(echo "$row" | jq -r '.version')
+                echo "=== $name@$version (registry tarball) ==="
+                url=$(npm view "$name@$version" dist.tarball 2>&1 || echo "(npm view failed)")
+                echo "url: $url"
+                if [ -n "$url" ] && [ "$url" != "(npm view failed)" ]; then
+                  tmp=$(mktemp -d)
+                  if curl -fsSL -o "$tmp/pkg.tgz" "$url" 2>&1; then
+                    echo "tarball size: $(stat -c%s "$tmp/pkg.tgz") bytes"
+                    echo "tarball contents:"
+                    tar -tzf "$tmp/pkg.tgz" 2>&1 | sed 's/^/  /'
+                  else
+                    echo "(curl failed)"
+                  fi
+                  rm -rf "$tmp"
+                fi
+                echo
+              done
+            `).slice(0, 4000);
+
             const body = [
               `**Diagnostic [\`${fixture}\`] — post-publish state**`,
               '',
@@ -530,6 +562,11 @@ jobs:
               '### npm pack --dry-run (post-publish, same dir engine published from)',
               '```',
               packs,
+              '```',
+              '',
+              '### Registry tarball contents (what verify actually downloads)',
+              '```',
+              registry,
               '```',
             ].join('\n');
             await github.rest.issues.createComment({
