@@ -138,9 +138,9 @@ async function publishImpl(
   // exchange fails. Docs (docs/guide/auth.md) promise OIDC wins over
   // PYPI_API_TOKEN so a stale repo secret can't shadow the
   // short-lived path.
-  const oidcToken = await mintOidcToken(ctx);
+  const oidc = await mintOidcToken(ctx);
   const explicitToken = nonEmpty(ctx.env.PYPI_API_TOKEN) ?? nonEmpty(process.env.PYPI_API_TOKEN);
-  const token = oidcToken ?? explicitToken;
+  const token = oidc.ok ? oidc.token : explicitToken;
   if (!token) {
     throw new Error(
       [
@@ -154,7 +154,7 @@ async function publishImpl(
     );
   }
   ctx.log.info(
-    oidcToken ? 'pypi: authenticating via OIDC trusted publishing' : 'pypi: authenticating via PYPI_API_TOKEN',
+    oidc.ok ? 'pypi: authenticating via OIDC trusted publishing' : 'pypi: authenticating via PYPI_API_TOKEN',
   );
 
   try {
@@ -211,32 +211,58 @@ function pypiNameFor(pkg: { name: string; pypi?: string }): string {
 }
 
 /**
- * Trusted-publishing OIDC exchange. Returns a short-lived API token
- * from PyPI when the workflow exposes ACTIONS_ID_TOKEN_REQUEST_*; null
- * when the env isn't there or the exchange fails (caller decides
- * whether to error).
+ * Outcome of an OIDC trusted-publishing exchange. Every non-success
+ * branch carries a machine-readable `reason` so callers (and the
+ * failure renderer in #verbose.ts) can distinguish:
+ *
+ *  - `env-missing`     ACTIONS_ID_TOKEN_REQUEST_{URL,TOKEN} not present
+ *                      in the runner env. Usually means `id-token: write`
+ *                      wasn't declared on the job.
+ *  - `id-token-http`   The runner's id-token endpoint returned non-2xx.
+ *                      `detail` carries the status. Often transient.
+ *  - `id-token-empty`  2xx response but `value` field absent. Pathological
+ *                      runner state; not retryable.
+ *  - `mint-rejected`   PyPI returned non-2xx on the mint exchange.
+ *                      `detail` carries `<status>: <body excerpt>`. The
+ *                      typical `invalid-publisher` 422 lands here with
+ *                      the expected `job_workflow_ref` list visible to
+ *                      the caller (used by Phase 2/Idea 3 to dump the
+ *                      probe result into the auth-failure error).
+ *
+ * Replaces the prior `string | null` shape. Phase 1 / Idea 1.
  */
-async function mintOidcToken(ctx: Ctx): Promise<string | null> {
+export type OidcMintResult =
+  | { ok: true; token: string }
+  | {
+      ok: false;
+      reason: 'env-missing' | 'id-token-http' | 'id-token-empty' | 'mint-rejected';
+      detail?: string;
+    };
+
+/**
+ * Trusted-publishing OIDC exchange. Returns a tagged result so every
+ * failure branch is named — see `OidcMintResult` for the vocabulary.
+ * Exported for direct testing of each skip path.
+ */
+export async function mintOidcToken(ctx: Ctx): Promise<OidcMintResult> {
   const reqUrl =
     nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_URL) ??
     nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
   const reqToken =
     nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) ??
     nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN);
-  if (!reqUrl || !reqToken) return null;
+  if (!reqUrl || !reqToken) return { ok: false, reason: 'env-missing' };
 
   const idTokenRes = await fetch(`${reqUrl}&audience=pypi`, {
     headers: { authorization: `bearer ${reqToken}` },
   });
   if (!idTokenRes.ok) {
-    ctx.log.warn(`pypi: OIDC id-token request failed: ${idTokenRes.status}`);
-    return null;
+    return { ok: false, reason: 'id-token-http', detail: `status ${idTokenRes.status}` };
   }
   const idTokenJson = (await idTokenRes.json()) as { value?: string };
   const idToken = idTokenJson.value;
   if (!idToken) {
-    ctx.log.warn('pypi: OIDC id-token response missing `value`');
-    return null;
+    return { ok: false, reason: 'id-token-empty' };
   }
 
   const mintRes = await fetch(`${REGISTRY}/_/oidc/mint-token`, {
@@ -246,11 +272,19 @@ async function mintOidcToken(ctx: Ctx): Promise<string | null> {
   });
   if (!mintRes.ok) {
     const body = await mintRes.text();
-    ctx.log.warn(`pypi: OIDC mint-token failed (${mintRes.status}): ${body.slice(0, 200)}`);
-    return null;
+    return {
+      ok: false,
+      reason: 'mint-rejected',
+      detail: `status ${mintRes.status}: ${body.slice(0, 400)}`,
+    };
   }
   const mintJson = (await mintRes.json()) as { token?: string };
-  return mintJson.token ?? null;
+  if (!mintJson.token) {
+    // Pathological — 2xx with no token field. Map to mint-rejected so
+    // callers handle it the same way as a 4xx (auth path is busted).
+    return { ok: false, reason: 'mint-rejected', detail: 'mint response missing `token`' };
+  }
+  return { ok: true, token: mintJson.token };
 }
 
 /**

@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { pypi, scmEnvSuffix } from './pypi.js';
+import { mintOidcToken, pypi, scmEnvSuffix } from './pypi.js';
 import type { Ctx } from '../types.js';
 
 vi.mock('node:child_process', async (orig) => {
@@ -721,5 +721,129 @@ describe('scmEnvSuffix (#207)', () => {
     expect(scmEnvSuffix('my_lib')).toBe('MY_LIB');
     expect(scmEnvSuffix('my--lib')).toBe('MY_LIB');
     expect(scmEnvSuffix('coaxer')).toBe('COAXER');
+  });
+});
+
+// Phase 1 / Idea 1: mintOidcToken returns a discriminated union so every
+// skip path carries a machine-readable reason. Replaces the prior
+// `string | null` shape that silently dropped the *why* on the floor —
+// the `oidc-env-missing` and `mint-rejected` branches looked identical
+// to the caller, which made the auth-failure error message generic and
+// forced foreign agents to read the source to disambiguate.
+describe('mintOidcToken (#XXX, Phase 1 / Idea 1)', () => {
+  function ctxWith(env: Record<string, string>): Ctx {
+    return makeCtx({ env });
+  }
+
+  it('returns ok=false reason=env-missing when ACTIONS_ID_TOKEN_REQUEST_URL is absent', async () => {
+    const result = await mintOidcToken(
+      ctxWith({ ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token' }),
+    );
+    expect(result).toEqual({ ok: false, reason: 'env-missing' });
+  });
+
+  it('returns ok=false reason=env-missing when ACTIONS_ID_TOKEN_REQUEST_TOKEN is absent', async () => {
+    const result = await mintOidcToken(
+      ctxWith({ ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc' }),
+    );
+    expect(result).toEqual({ ok: false, reason: 'env-missing' });
+  });
+
+  it('returns ok=false reason=env-missing when both env vars are empty strings', async () => {
+    // Empty strings are common in CI harness `FOO: ${{ env.FOO || '' }}`
+    // patterns; nonEmpty() should still treat them as unset.
+    const result = await mintOidcToken(
+      ctxWith({
+        ACTIONS_ID_TOKEN_REQUEST_URL: '',
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: '',
+      }),
+    );
+    expect(result).toEqual({ ok: false, reason: 'env-missing' });
+  });
+
+  it('returns ok=false reason=id-token-http with detail on non-2xx id-token request', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('upstream is sad', { status: 500 }),
+    );
+    const result = await mintOidcToken(
+      ctxWith({
+        ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc',
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token',
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.reason).toBe('id-token-http');
+    // Detail should carry the status so callers can distinguish a 4xx
+    // (caller misconfigured) from a 5xx (transient upstream).
+    expect(result.detail).toMatch(/500/);
+    fetchSpy.mockRestore();
+  });
+
+  it('returns ok=false reason=id-token-empty when id-token response has no value', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 200 }),
+    );
+    const result = await mintOidcToken(
+      ctxWith({
+        ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc',
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token',
+      }),
+    );
+    expect(result).toEqual({ ok: false, reason: 'id-token-empty' });
+    fetchSpy.mockRestore();
+  });
+
+  it('returns ok=false reason=mint-rejected with detail body on non-2xx mint exchange', async () => {
+    // The `invalid-publisher` 422 case is the one the foreign-agent
+    // incident hinged on: PyPI's response body carries the expected
+    // `job_workflow_ref` list. Phase 2/Idea 3 will surface this detail
+    // into the user-facing error; for now, idea 1 just preserves it.
+    const body = JSON.stringify({
+      errors: [{ code: 'invalid-publisher', description: 'job_workflow_ref claim does not match' }],
+    });
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/oidc/request-token')) {
+        return Promise.resolve(new Response(JSON.stringify({ value: 'gha-id-token' }), { status: 200 }));
+      }
+      if (url.endsWith('/_/oidc/mint-token')) {
+        return Promise.resolve(new Response(body, { status: 422 }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const result = await mintOidcToken(
+      ctxWith({
+        ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc',
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token',
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.reason).toBe('mint-rejected');
+    expect(result.detail).toMatch(/422/);
+    expect(result.detail).toMatch(/invalid-publisher/);
+    fetchSpy.mockRestore();
+  });
+
+  it('returns ok=true with token on a successful exchange', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/oidc/request-token')) {
+        return Promise.resolve(new Response(JSON.stringify({ value: 'gha-id-token' }), { status: 200 }));
+      }
+      if (url.endsWith('/_/oidc/mint-token')) {
+        return Promise.resolve(new Response(JSON.stringify({ token: 'pypi-short-lived' }), { status: 200 }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const result = await mintOidcToken(
+      ctxWith({
+        ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc',
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token',
+      }),
+    );
+    expect(result).toEqual({ ok: true, token: 'pypi-short-lived' });
+    fetchSpy.mockRestore();
   });
 });
