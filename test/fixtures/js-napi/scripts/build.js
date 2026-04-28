@@ -9,6 +9,9 @@ const pkg = require('../package.json');
 const target = process.env.TARGET;
 if (!target || target === 'main' || target === 'noarch') process.exit(0);
 
+// napi-rs convention: file is named by the unscoped basename.
+const base = pkg.name.includes('/') ? pkg.name.split('/')[1] : pkg.name;
+
 const dir = join('build', target);
 mkdirSync(dir, { recursive: true });
-writeFileSync(join(dir, `${pkg.name}.${target}.node`), 'fixture canary');
+writeFileSync(join(dir, `${base}.${target}.node`), 'fixture canary');
