@@ -735,6 +735,29 @@ describe('mintOidcToken (#XXX, Phase 1 / Idea 1)', () => {
     return makeCtx({ env });
   }
 
+  // Phase 2 / Idea 2: every code path through mintOidcToken now emits
+  // an observable log breadcrumb. The prior `string | null` shape went
+  // silent on the env-missing branch — foreign agents debugging a
+  // failed publish had to read source to discover the path even ran.
+  function captureCtx(env: Record<string, string>): {
+    ctx: Ctx;
+    info: string[];
+    warn: string[];
+  } {
+    const info: string[] = [];
+    const warn: string[] = [];
+    const ctx = makeCtx({
+      env,
+      log: {
+        debug: () => {},
+        info: (msg: string) => info.push(msg),
+        warn: (msg: string) => warn.push(msg),
+        error: () => {},
+      },
+    });
+    return { ctx, info, warn };
+  }
+
   it('returns ok=false reason=env-missing when ACTIONS_ID_TOKEN_REQUEST_URL is absent', async () => {
     const result = await mintOidcToken(
       ctxWith({ ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token' }),
@@ -844,6 +867,117 @@ describe('mintOidcToken (#XXX, Phase 1 / Idea 1)', () => {
       }),
     );
     expect(result).toEqual({ ok: true, token: 'pypi-short-lived' });
+    fetchSpy.mockRestore();
+  });
+
+  // -------- Phase 2 / Idea 2: log breadcrumbs ---------------------------
+
+  it('emits an info breadcrumb when an OIDC attempt is actually made', async () => {
+    const { ctx, info } = captureCtx({
+      ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc',
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token',
+    });
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/oidc/request-token')) {
+        return Promise.resolve(new Response(JSON.stringify({ value: 'gha-id-token' }), { status: 200 }));
+      }
+      if (url.endsWith('/_/oidc/mint-token')) {
+        return Promise.resolve(new Response(JSON.stringify({ token: 'pypi-short-lived' }), { status: 200 }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    await mintOidcToken(ctx);
+    expect(info.some((m) => /attempting OIDC/i.test(m))).toBe(true);
+    fetchSpy.mockRestore();
+  });
+
+  it('warns with reason=env-missing when env vars are absent (was previously silent)', async () => {
+    const { ctx, warn, info } = captureCtx({});
+    const result = await mintOidcToken(ctx);
+    expect(result.ok).toBe(false);
+    // The canonical regression: Phase 1 returned null silently here,
+    // emitting no log at all. Phase 2 must produce an observable warn
+    // that names the reason so the failure is traceable from logs alone.
+    expect(warn.some((m) => /reason=env-missing/.test(m))).toBe(true);
+    // No "attempting" breadcrumb — the env check short-circuits before
+    // any attempt is made.
+    expect(info.some((m) => /attempting OIDC/i.test(m))).toBe(false);
+  });
+
+  it('warns with reason=id-token-http and the HTTP status', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('upstream is sad', { status: 500 }),
+    );
+    const { ctx, warn } = captureCtx({
+      ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc',
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token',
+    });
+    await mintOidcToken(ctx);
+    expect(warn.some((m) => /reason=id-token-http/.test(m) && /500/.test(m))).toBe(true);
+    fetchSpy.mockRestore();
+  });
+
+  it('warns with reason=id-token-empty when the runner returns no value', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 200 }),
+    );
+    const { ctx, warn } = captureCtx({
+      ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc',
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token',
+    });
+    await mintOidcToken(ctx);
+    expect(warn.some((m) => /reason=id-token-empty/.test(m))).toBe(true);
+    fetchSpy.mockRestore();
+  });
+
+  it('warns with reason=mint-rejected and a body excerpt on a 422 invalid-publisher', async () => {
+    // The exact shape the foreign-agent incident produced: PyPI returns
+    // 422 with the expected `job_workflow_ref` list in the body. The
+    // warn must surface the body (not just the status) so a reader of
+    // the run log can see *why* TP rejected the claim without diving
+    // into the source.
+    const body = JSON.stringify({
+      errors: [{ code: 'invalid-publisher', description: 'job_workflow_ref claim does not match' }],
+    });
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/oidc/request-token')) {
+        return Promise.resolve(new Response(JSON.stringify({ value: 'gha-id-token' }), { status: 200 }));
+      }
+      if (url.endsWith('/_/oidc/mint-token')) {
+        return Promise.resolve(new Response(body, { status: 422 }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const { ctx, warn } = captureCtx({
+      ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc',
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token',
+    });
+    await mintOidcToken(ctx);
+    expect(warn.some((m) => /reason=mint-rejected/.test(m))).toBe(true);
+    expect(warn.some((m) => /invalid-publisher/.test(m))).toBe(true);
+    expect(warn.some((m) => /422/.test(m))).toBe(true);
+    fetchSpy.mockRestore();
+  });
+
+  it('does not warn on a successful exchange', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/oidc/request-token')) {
+        return Promise.resolve(new Response(JSON.stringify({ value: 'gha-id-token' }), { status: 200 }));
+      }
+      if (url.endsWith('/_/oidc/mint-token')) {
+        return Promise.resolve(new Response(JSON.stringify({ token: 'pypi-short-lived' }), { status: 200 }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const { ctx, warn } = captureCtx({
+      ACTIONS_ID_TOKEN_REQUEST_URL: 'https://gha.example/oidc/request-token?abc',
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'gha-token',
+    });
+    await mintOidcToken(ctx);
+    expect(warn).toEqual([]);
     fetchSpy.mockRestore();
   });
 });

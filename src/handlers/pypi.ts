@@ -251,17 +251,34 @@ export async function mintOidcToken(ctx: Ctx): Promise<OidcMintResult> {
   const reqToken =
     nonEmpty(ctx.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) ??
     nonEmpty(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN);
-  if (!reqUrl || !reqToken) return { ok: false, reason: 'env-missing' };
+  if (!reqUrl || !reqToken) {
+    // Was previously a silent `return null`. Foreign agents debugging
+    // the foreign-agent incident had no way to tell from logs that
+    // OIDC was even tried; the reason-tagged warn closes that gap.
+    ctx.log.warn(
+      'pypi: OIDC skipped (reason=env-missing): ACTIONS_ID_TOKEN_REQUEST_URL or ACTIONS_ID_TOKEN_REQUEST_TOKEN absent (id-token: write not declared on the job?)',
+    );
+    return { ok: false, reason: 'env-missing' };
+  }
+
+  // Breadcrumb on entry only — by this point we have the env to try.
+  ctx.log.info('pypi: attempting OIDC trusted publishing (audience=pypi)');
 
   const idTokenRes = await fetch(`${reqUrl}&audience=pypi`, {
     headers: { authorization: `bearer ${reqToken}` },
   });
   if (!idTokenRes.ok) {
+    ctx.log.warn(
+      `pypi: OIDC skipped (reason=id-token-http): runner id-token endpoint returned ${idTokenRes.status}`,
+    );
     return { ok: false, reason: 'id-token-http', detail: `status ${idTokenRes.status}` };
   }
   const idTokenJson = (await idTokenRes.json()) as { value?: string };
   const idToken = idTokenJson.value;
   if (!idToken) {
+    ctx.log.warn(
+      'pypi: OIDC skipped (reason=id-token-empty): id-token response missing `value`',
+    );
     return { ok: false, reason: 'id-token-empty' };
   }
 
@@ -272,16 +289,26 @@ export async function mintOidcToken(ctx: Ctx): Promise<OidcMintResult> {
   });
   if (!mintRes.ok) {
     const body = await mintRes.text();
+    const excerpt = body.slice(0, 400);
+    // Body excerpt is the diagnostic — typically `invalid-publisher`
+    // with the expected `job_workflow_ref` list. Phase 2 / Idea 3
+    // surfaces this same detail into the user-facing error too.
+    ctx.log.warn(
+      `pypi: OIDC skipped (reason=mint-rejected): registry returned ${mintRes.status}: ${excerpt}`,
+    );
     return {
       ok: false,
       reason: 'mint-rejected',
-      detail: `status ${mintRes.status}: ${body.slice(0, 400)}`,
+      detail: `status ${mintRes.status}: ${excerpt}`,
     };
   }
   const mintJson = (await mintRes.json()) as { token?: string };
   if (!mintJson.token) {
     // Pathological — 2xx with no token field. Map to mint-rejected so
     // callers handle it the same way as a 4xx (auth path is busted).
+    ctx.log.warn(
+      'pypi: OIDC skipped (reason=mint-rejected): mint response 2xx but missing `token` field',
+    );
     return { ok: false, reason: 'mint-rejected', detail: 'mint response missing `token`' };
   }
   return { ok: true, token: mintJson.token };
