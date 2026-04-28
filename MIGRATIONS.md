@@ -25,8 +25,7 @@ Each section covers five things, in order:
 
 **Summary.** GitHub deprecated Node 20 actions in September 2025; the
 hosted runner forces Node 24 starting June 2, 2026 and removes Node 20
-entirely on September 16, 2026
-([changelog](https://github.blog/changelog/2025-09-09-actions-deprecation-of-node20/)).
+entirely on September 16, 2026.
 Every workflow run that called `putitoutthere` was emitting deprecation
 warnings — one per job inside the reusable workflow, plus a top-level
 `Actions running on Node.js 20` warning attributed to
