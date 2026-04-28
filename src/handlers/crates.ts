@@ -98,7 +98,20 @@ async function publishImpl(
   // Reinstate a narrower check: only the Cargo.toml we just wrote may
   // be dirty. Anything else = a bug or a stray edit that would end up
   // in the crate tarball. Published crates can't be unpublished.
-  const unexpected = scanDirtyOutsideManifest(ctx.cwd, pkg.path, ctx.artifactsRoot);
+  //
+  // Sibling package paths are whitelisted: a polyglot consumer with
+  // rust + js packages will have install state (node_modules/, dist/,
+  // package-lock.json) inside the js package's path during publish
+  // (the reusable workflow's `Build npm packages` step runs
+  // `npm install + npm run build` per npm package before the engine
+  // publishes). cargo only packs files inside its own package dir, so
+  // sibling-package state can't end up in the crate tarball anyway.
+  const unexpected = scanDirtyOutsideManifest(
+    ctx.cwd,
+    pkg.path,
+    ctx.artifactsRoot,
+    ctx.siblingPackagePaths,
+  );
   if (unexpected !== null && unexpected.length > 0) {
     throw new Error(
       [
@@ -181,6 +194,7 @@ export function scanDirtyOutsideManifest(
   cwd: string,
   pkgPath: string,
   artifactsRoot?: string,
+  siblingPackagePaths?: readonly string[],
 ): string[] | null {
   // Confirm we're inside a git work tree. If not, bail and let cargo's
   // own --allow-dirty handling take over.
@@ -231,6 +245,17 @@ export function scanDirtyOutsideManifest(
     const r = relative(cwd, artifactsRoot);
     artifactsRel = r === '' ? '' : r.replace(/\\/g, '/');
   }
+  // Sibling package directories — anything inside them is workflow
+  // state from another handler (e.g. node_modules/ + package-lock.json
+  // + dist/ from the npm `Build npm packages` step). cargo only packs
+  // files inside its own package dir, so these can't end up in the
+  // crate tarball regardless of whether they're "dirty" by git's view.
+  const siblingRels: string[] = [];
+  for (const p of siblingPackagePaths ?? []) {
+    const r = relative(cwd, p);
+    if (r === '' || r.startsWith('..')) continue;
+    siblingRels.push(r.replace(/\\/g, '/'));
+  }
   const unexpected: string[] = [];
   for (const raw of porcelain.split('\n')) {
     if (raw.length < 4) continue;
@@ -247,6 +272,16 @@ export function scanDirtyOutsideManifest(
       (normalized === artifactsRel ||
         normalized === `${artifactsRel}/` ||
         normalized.startsWith(`${artifactsRel}/`))
+    ) {
+      continue;
+    }
+    if (
+      siblingRels.some(
+        (s) =>
+          normalized === s ||
+          normalized === `${s}/` ||
+          normalized.startsWith(`${s}/`),
+      )
     ) {
       continue;
     }

@@ -28,6 +28,8 @@ are prefixed `**BREAKING**` and link to the matching section in
 
 ### Fixed
 
+- **Crates publish no longer refuses on workflow-managed install state in sibling packages.** Before, the engine's pre-publish dirty-workspace check (`scanDirtyOutsideManifest`) flagged anything dirty outside the package's `Cargo.toml`. For polyglot consumers (rust + js in one repo), the reusable workflow's `Build npm packages` step (#256) creates `node_modules/`, `package-lock.json`, and `dist/` inside each npm package's path before cargo publish runs — these are workflow scratch, not stray edits, and cargo can't pack them anyway (it only packs files inside the crate's own dir). The check now whitelists every other configured package's path, similar to how it already whitelists `artifacts/`. Stray edits elsewhere in the repo (a `README.md` change, etc.) still fail the check. Hit in the wild on the polyglot-everything e2e fixture; would also have hit any consumer with the same shape.
+
 - **Dogfood release workflow no longer silently downgrades `release: minor` to `patch`.** `release-npm.yml`'s "Fold action bundle into release commit" step now forwards the parent commit's body into the bundle commit, so any `release:` trailer the operator wrote in the merge commit survives into the new HEAD. Without the forward, `putitoutthere`'s publish-time plan re-derivation read HEAD (the bundle commit), saw no trailer on a single-parent commit, and defaulted the bump to `patch` — silently downgrading a `release: minor` to `0.x.(y+1)`. Hit in the wild on the 0.1.51 → 0.2.0 attempt that landed as 0.1.52. The reusable consumer-facing `release.yml` was unaffected (it never adds a commit between plan and publish). Internal-seam fix; no consumer-side action required.
 
 ## v0.1.51 → v0.2.0
