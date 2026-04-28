@@ -69,6 +69,17 @@ export interface Ctx {
    * they need to upload. Optional so local/doctor flows can omit.
    */
   artifactsRoot?: string;
+  /**
+   * Working directories of the OTHER packages in this config. The
+   * crates handler whitelists these in its pre-publish dirty-workspace
+   * check: a polyglot consumer with rust + js packages will have
+   * workflow-generated install state (node_modules/, dist/,
+   * package-lock.json) inside the js package's path during publish, and
+   * cargo can never pack files outside its own package dir, so the
+   * dirty-check shouldn't refuse on them. Optional so local/test flows
+   * can omit; absent => empty list.
+   */
+  siblingPackagePaths?: readonly string[];
 }
 
 export interface Logger {

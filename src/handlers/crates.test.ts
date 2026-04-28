@@ -568,6 +568,77 @@ describe('scanDirtyOutsideManifest (#135)', () => {
     }
   });
 
+  it('skips files inside sibling package paths — workflow-managed install state', () => {
+    // Polyglot setup: rust crate at packages/rust/, npm package at
+    // packages/ts/. The reusable workflow's `Build npm packages` step
+    // creates packages/ts/{node_modules,dist,package-lock.json} as
+    // untracked files before cargo publish runs. None of that can end
+    // up in the rust crate's tarball — cargo only packs from
+    // packages/rust/ — so the dirty check shouldn't refuse on them.
+    mkdirSync(join(repo, 'packages/rust'), { recursive: true });
+    mkdirSync(join(repo, 'packages/ts'), { recursive: true });
+    writeFileSync(
+      join(repo, 'packages/rust/Cargo.toml'),
+      '[package]\nname = "demo"\nversion = "0.1.0"\n',
+      'utf8',
+    );
+    writeFileSync(
+      join(repo, 'packages/ts/package.json'),
+      '{"name":"@demo/ts","version":"0.1.0"}\n',
+      'utf8',
+    );
+    git(['add', '-A'], repo);
+    git(['commit', '-q', '-m', 'init'], repo);
+    // Bump the managed Cargo.toml + create install state in the
+    // sibling package, mirroring what the publish job does.
+    writeFileSync(
+      join(repo, 'packages/rust/Cargo.toml'),
+      '[package]\nname = "demo"\nversion = "0.2.0"\n',
+      'utf8',
+    );
+    mkdirSync(join(repo, 'packages/ts/node_modules/typescript/bin'), { recursive: true });
+    writeFileSync(join(repo, 'packages/ts/node_modules/typescript/bin/tsc'), 'x', 'utf8');
+    writeFileSync(join(repo, 'packages/ts/package-lock.json'), '{}', 'utf8');
+    mkdirSync(join(repo, 'packages/ts/dist'), { recursive: true });
+    writeFileSync(join(repo, 'packages/ts/dist/index.js'), 'x', 'utf8');
+    const result = scanDirtyOutsideManifest(
+      repo,
+      join(repo, 'packages/rust'),
+      undefined,
+      [join(repo, 'packages/ts')],
+    );
+    expect(result).toEqual([]);
+  });
+
+  it('still flags non-sibling paths when siblingPackagePaths is provided', () => {
+    mkdirSync(join(repo, 'packages/rust'), { recursive: true });
+    mkdirSync(join(repo, 'packages/ts'), { recursive: true });
+    writeFileSync(
+      join(repo, 'packages/rust/Cargo.toml'),
+      '[package]\nname = "demo"\nversion = "0.1.0"\n',
+      'utf8',
+    );
+    writeFileSync(join(repo, 'README.md'), 'init\n', 'utf8');
+    git(['add', '-A'], repo);
+    git(['commit', '-q', '-m', 'init'], repo);
+    writeFileSync(
+      join(repo, 'packages/rust/Cargo.toml'),
+      '[package]\nname = "demo"\nversion = "0.2.0"\n',
+      'utf8',
+    );
+    writeFileSync(join(repo, 'README.md'), 'stray\n', 'utf8');
+    mkdirSync(join(repo, 'packages/ts'), { recursive: true });
+    writeFileSync(join(repo, 'packages/ts/dist'), 'x', 'utf8');
+    const result = scanDirtyOutsideManifest(
+      repo,
+      join(repo, 'packages/rust'),
+      undefined,
+      [join(repo, 'packages/ts')],
+    );
+    expect(result).toContain('README.md');
+    expect(result?.some((p) => p.startsWith('packages/ts'))).toBe(false);
+  });
+
   it('crates.publish rejects with a clear error when an unrelated file is dirty', async () => {
     mkdirSync(join(repo, 'crate'), { recursive: true });
     writeFileSync(join(repo, 'crate/Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n', 'utf8');

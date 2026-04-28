@@ -118,6 +118,12 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
         has: () => true, // completeness check already ran
       },
       artifactsRoot: artifactsRoot(cwd),
+      // Pass other packages' working dirs so the crates dirty-check
+      // can recognize them as workflow-managed scratch (npm install
+      // state, build outputs) rather than stray edits.
+      siblingPackagePaths: config.packages
+        .filter((p) => p.name !== name)
+        .map((p) => p.path),
     };
 
     try {
