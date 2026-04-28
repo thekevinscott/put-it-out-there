@@ -230,7 +230,6 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -322,23 +321,13 @@ jobs:
         if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
         shell: bash
         env:
-          FIXTURE: ${{ inputs.fixture }}
           MATRIX: ${{ needs.plan.outputs.matrix }}
         run: |
           set -euo pipefail
-          : > /tmp/build-debug.txt
           paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
-          echo "[fixture=${FIXTURE:-?}] npm paths: $(echo "$paths" | tr '\n' ' ')" | tee -a /tmp/build-debug.txt
           for path in $paths; do
             echo "::group::npm install + build at fixture-tree/${path}"
             pushd "fixture-tree/${path}" > /dev/null
-            {
-              echo ""
-              echo "=== fixture-tree/${path} ==="
-              echo "pwd: $(pwd)"
-              echo "before build:"
-              ls -la
-            } | tee -a /tmp/build-debug.txt
             if [ -f package-lock.json ]; then
               npm ci
             elif [ -f pnpm-lock.yaml ]; then
@@ -348,14 +337,6 @@ jobs:
               npm install
             fi
             npm run build --if-present
-            {
-              echo "after build:"
-              ls -la
-              echo "dist/ contents:"
-              ls -la dist/ 2>&1 || echo "  (no dist/)"
-              echo "npm pack --dry-run preview:"
-              npm pack --dry-run 2>&1 | head -30 || true
-            } | tee -a /tmp/build-debug.txt
             popd > /dev/null
             echo "::endgroup::"
           done
@@ -407,13 +388,10 @@ jobs:
             fi
             echo "[$pkg_name@$version] verifying tarball contains: ${dirs[*]}"
             tarball_url=$(npm view "$pkg_name@$version" dist.tarball)
-            echo "  tarball url: $tarball_url"
             tmp=$(mktemp -d)
             curl -fsSL -o "$tmp/pkg.tgz" "$tarball_url"
             mkdir "$tmp/extracted"
             tar -xzf "$tmp/pkg.tgz" -C "$tmp/extracted"
-            echo "  full tarball contents:"
-            find "$tmp/extracted/package" -type f | sed 's/^/    /'
             for d in "${dirs[@]}"; do
               if [ -d "$tmp/extracted/package/$d" ] && \
                  [ "$(find "$tmp/extracted/package/$d" -type f | wc -l)" -gt 0 ]; then
@@ -433,45 +411,6 @@ jobs:
             rm -rf "$tmp"
           done <<< "$rows"
           exit "$fail"
-
-      - name: Post diagnostic as PR comment
-        if: always() && contains(needs.plan.outputs.matrix, '"kind":"npm"')
-        uses: actions/github-script@v7
-        env:
-          FIXTURE: ${{ inputs.fixture }}
-        with:
-          script: |
-            const fs = require('fs');
-            const cp = require('child_process');
-            let debug = '(no /tmp/build-debug.txt produced — Build step did not run)';
-            try { debug = fs.readFileSync('/tmp/build-debug.txt', 'utf8'); } catch {}
-            // Snapshot post-publish fixture-tree state.
-            let post = '';
-            try {
-              post = cp.execSync('find fixture-tree -maxdepth 4 -not -path "*/node_modules/*" -not -path "*/.git/*" 2>&1', { encoding: 'utf8' });
-            } catch (e) { post = `(find failed: ${e.message})`; }
-            const fixture = process.env.FIXTURE;
-            const body = [
-              `**Diagnostic: \`${fixture}\` publish-job state**`,
-              '',
-              '### Build step debug output',
-              '```',
-              debug,
-              '```',
-              '',
-              '### Post-publish fixture-tree (excl node_modules, .git)',
-              '```',
-              post,
-              '```',
-            ].join('\n');
-            const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-              owner: context.repo.owner, repo: context.repo.repo, commit_sha: context.sha,
-            });
-            if (prs.data.length === 0) { core.info('no PR for sha; skipping comment'); return; }
-            await github.rest.issues.createComment({
-              owner: context.repo.owner, repo: context.repo.repo,
-              issue_number: prs.data[0].number, body,
-            });
 
   # NOTE: the caller-side `pypi-publish` job lives in `.github/workflows/e2e.yml`,
   # not here. `pypa/gh-action-pypi-publish` aborts when invoked from inside
