@@ -364,7 +364,8 @@ jobs:
             for d in "${dirs[@]}"; do
               local_path="fixture-tree/${pkg_path}/${d}"
               if [ ! -d "$local_path" ]; then
-                echo "::error::[${pkg_name}] declared files[\"${d}\"] but ${local_path} does not exist after Build step. ls fixture-tree/${pkg_path}: $(ls "fixture-tree/${pkg_path}" 2>&1 | tr '\n' ' ')"
+                listing=$(find "fixture-tree/${pkg_path}" -mindepth 1 -maxdepth 1 -printf '%f ' 2>/dev/null || true)
+                echo "::error::[${pkg_name}] declared files[${d}] but ${local_path} does not exist after Build step. fixture-tree/${pkg_path} contents: ${listing}"
                 fail=1
                 continue
               fi
@@ -376,10 +377,13 @@ jobs:
               fi
               echo "OK pre-publish [${pkg_name}] ${local_path}: ${count} file(s)"
             done
-            pack=$(cd "fixture-tree/${pkg_path}" && npm pack --dry-run 2>&1 || true)
+            pushd "fixture-tree/${pkg_path}" > /dev/null
+            pack=$(npm pack --dry-run 2>&1 || echo "(npm pack failed)")
+            popd > /dev/null
             for d in "${dirs[@]}"; do
               if ! printf '%s' "$pack" | grep -q "${d}/"; then
-                echo "::error::[${pkg_name}] npm pack --dry-run does NOT include ${d}/. Full pack output: $(printf '%s' "$pack" | tr '\n' '|')"
+                pack_compact=$(printf '%s' "$pack" | tr '\n' '|')
+                echo "::error::[${pkg_name}] npm pack --dry-run does NOT include ${d}/. Full pack output: ${pack_compact}"
                 fail=1
               fi
             done
