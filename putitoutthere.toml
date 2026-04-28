@@ -19,6 +19,14 @@ globs = [
   "tsconfig.build.json",
   "action.yml",
   "dist-action/**",
+  # The reusable workflow IS public surface — consumer release runs
+  # use it directly. A fix landing in `release.yml` is a consumer-
+  # observable change and must trigger a putitoutthere release so
+  # `@v0` consumers pick it up. e2e-fixture.yml is internal but
+  # changes there usually accompany release.yml changes; including
+  # it keeps the cascade honest when only the e2e mirror is touched.
+  ".github/workflows/release.yml",
+  ".github/workflows/e2e-fixture.yml",
   # Docs changes ship a patch too -- they end up in the tarball via
   # README, and consumers sometimes pin documentation-driven behavior.
   "README.md",

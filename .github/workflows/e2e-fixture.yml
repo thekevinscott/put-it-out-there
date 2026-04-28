@@ -322,23 +322,13 @@ jobs:
         if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
         shell: bash
         env:
-          FIXTURE: ${{ inputs.fixture }}
           MATRIX: ${{ needs.plan.outputs.matrix }}
         run: |
           set -euo pipefail
-          : > /tmp/build-debug.txt
           paths=$(printf '%s' "$MATRIX" | jq -r '.[] | select(.kind == "npm") | .path' | sort -u)
-          echo "[fixture=${FIXTURE:-?}] npm paths: $(echo "$paths" | tr '\n' ' ')" | tee -a /tmp/build-debug.txt
           for path in $paths; do
             echo "::group::npm install + build at fixture-tree/${path}"
             pushd "fixture-tree/${path}" > /dev/null
-            {
-              echo ""
-              echo "=== fixture-tree/${path} ==="
-              echo "pwd: $(pwd)"
-              echo "before build:"
-              ls -la
-            } | tee -a /tmp/build-debug.txt
             if [ -f package-lock.json ]; then
               npm ci
             elif [ -f pnpm-lock.yaml ]; then
@@ -348,17 +338,58 @@ jobs:
               npm install
             fi
             npm run build --if-present
-            {
-              echo "after build:"
-              ls -la
-              echo "dist/ contents:"
-              ls -la dist/ 2>&1 || echo "  (no dist/)"
-              echo "npm pack --dry-run preview:"
-              npm pack --dry-run 2>&1 | head -30 || true
-            } | tee -a /tmp/build-debug.txt
             popd > /dev/null
             echo "::endgroup::"
           done
+
+      # TEMPORARY DIAGNOSTIC (#258): assert pre-publish state for each
+      # npm main/noarch package. Fails the step (with the failure
+      # annotation describing what's wrong) when:
+      #   - package.json declares a directory in `files[]` that doesn't
+      #     exist on disk (Build npm packages step didn't produce it), or
+      #   - npm pack --dry-run wouldn't include that directory.
+      # Strip once the verify failure root cause is understood.
+      - name: Pre-publish fixture-tree assertion (diagnostic)
+        if: contains(needs.plan.outputs.matrix, '"kind":"npm"')
+        shell: bash
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          set -uo pipefail
+          rows=$(printf '%s' "$MATRIX" | jq -c '.[] | select(.kind == "npm" and (.target == "main" or .target == "noarch"))')
+          fail=0
+          while IFS= read -r row; do
+            pkg_path=$(printf '%s' "$row" | jq -r '.path')
+            pkg_name=$(printf '%s' "$row" | jq -r '.name')
+            mapfile -t dirs < <(jq -r '.files[]? | select(contains(".") | not)' "fixture-tree/${pkg_path}/package.json")
+            for d in "${dirs[@]}"; do
+              local_path="fixture-tree/${pkg_path}/${d}"
+              if [ ! -d "$local_path" ]; then
+                listing=$(find "fixture-tree/${pkg_path}" -mindepth 1 -maxdepth 1 -printf '%f ' 2>/dev/null || true)
+                echo "::error::[${pkg_name}] declared files[${d}] but ${local_path} does not exist after Build step. fixture-tree/${pkg_path} contents: ${listing}"
+                fail=1
+                continue
+              fi
+              count=$(find "$local_path" -type f 2>/dev/null | wc -l)
+              if [ "$count" -eq 0 ]; then
+                echo "::error::[${pkg_name}] ${local_path} exists but is empty"
+                fail=1
+                continue
+              fi
+              echo "OK pre-publish [${pkg_name}] ${local_path}: ${count} file(s)"
+            done
+            pushd "fixture-tree/${pkg_path}" > /dev/null
+            pack=$(npm pack --dry-run 2>&1 || echo "(npm pack failed)")
+            popd > /dev/null
+            for d in "${dirs[@]}"; do
+              if ! printf '%s' "$pack" | grep -q "${d}/"; then
+                pack_compact=$(printf '%s' "$pack" | tr '\n' '|')
+                echo "::error::[${pkg_name}] npm pack --dry-run does NOT include ${d}/. Full pack output: ${pack_compact}"
+                fail=1
+              fi
+            done
+          done <<< "$rows"
+          exit "$fail"
 
       - uses: ./
         with:
@@ -407,13 +438,10 @@ jobs:
             fi
             echo "[$pkg_name@$version] verifying tarball contains: ${dirs[*]}"
             tarball_url=$(npm view "$pkg_name@$version" dist.tarball)
-            echo "  tarball url: $tarball_url"
             tmp=$(mktemp -d)
             curl -fsSL -o "$tmp/pkg.tgz" "$tarball_url"
             mkdir "$tmp/extracted"
             tar -xzf "$tmp/pkg.tgz" -C "$tmp/extracted"
-            echo "  full tarball contents:"
-            find "$tmp/extracted/package" -type f | sed 's/^/    /'
             for d in "${dirs[@]}"; do
               if [ -d "$tmp/extracted/package/$d" ] && \
                  [ "$(find "$tmp/extracted/package/$d" -type f | wc -l)" -gt 0 ]; then
@@ -434,34 +462,39 @@ jobs:
           done <<< "$rows"
           exit "$fail"
 
-      - name: Post diagnostic as PR comment
+      # TEMPORARY DIAGNOSTIC (#258): post all the state to a PR comment
+      # so it's actually readable via the GitHub MCP. Workflow logs and
+      # annotation text are auth-walled in the unauth API; PR comments
+      # aren't. Strip alongside the other diagnostic steps.
+      - name: Post diagnostic state as PR comment
         if: always() && contains(needs.plan.outputs.matrix, '"kind":"npm"')
         uses: actions/github-script@v7
         env:
           FIXTURE: ${{ inputs.fixture }}
         with:
           script: |
-            const fs = require('fs');
             const cp = require('child_process');
-            let debug = '(no /tmp/build-debug.txt produced — Build step did not run)';
-            try { debug = fs.readFileSync('/tmp/build-debug.txt', 'utf8'); } catch {}
-            // Snapshot post-publish fixture-tree state.
-            let post = '';
-            try {
-              post = cp.execSync('find fixture-tree -maxdepth 4 -not -path "*/node_modules/*" -not -path "*/.git/*" 2>&1', { encoding: 'utf8' });
-            } catch (e) { post = `(find failed: ${e.message})`; }
+            const sh = (cmd) => { try { return cp.execSync(cmd, { encoding: 'utf8' }); } catch (e) { return `(failed: ${e.message})\n${e.stdout || ''}${e.stderr || ''}`; } };
             const fixture = process.env.FIXTURE;
+            const tree = sh('find fixture-tree -maxdepth 4 -not -path "*/node_modules/*" -not -path "*/.git/*" 2>&1');
+            const pkgJsons = sh('find fixture-tree -name package.json -not -path "*/node_modules/*" -not -path "*/.git/*" -exec sh -c \'echo "=== $1 ==="; cat "$1"\' _ {} \\; 2>&1').slice(0, 4000);
+            const packs = sh('for d in fixture-tree fixture-tree/packages/*; do if [ -f "$d/package.json" ]; then echo "=== $d (npm pack --dry-run) ==="; (cd "$d" && npm pack --dry-run 2>&1 | head -25); fi; done').slice(0, 4000);
             const body = [
-              `**Diagnostic: \`${fixture}\` publish-job state**`,
+              `**Diagnostic [\`${fixture}\`] — post-publish state**`,
               '',
-              '### Build step debug output',
+              '### fixture-tree (excl node_modules, .git)',
               '```',
-              debug,
+              tree.slice(0, 3000),
               '```',
               '',
-              '### Post-publish fixture-tree (excl node_modules, .git)',
+              '### package.json contents',
+              '```json',
+              pkgJsons,
               '```',
-              post,
+              '',
+              '### npm pack --dry-run (post-publish, same dir engine published from)',
+              '```',
+              packs,
               '```',
             ].join('\n');
             const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({
