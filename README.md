@@ -49,7 +49,10 @@ jobs:
 ```
 
 Pinned action versions, `plan → build → publish` orchestration, and GitHub
-Release creation all live inside the reusable workflow. The `pypi-publish`
+Release creation all live inside the reusable workflow. Each tag the engine
+pushes gets a matching GitHub Release with notes auto-generated from PR
+titles between that tag and its predecessor (`gh release create
+--generate-notes`); no `gh release create` step is needed in your workflow. The `pypi-publish`
 job is the one piece that has to live in your workflow file: PyPI's
 Trusted Publisher feature filters OIDC tokens by `repository_owner` /
 `repository_name` claims, which always reflect the caller's repo — so a
