@@ -475,7 +475,7 @@ jobs:
         with:
           script: |
             const cp = require('child_process');
-            const sh = (cmd) => { try { return cp.execSync(cmd, { encoding: 'utf8' }); } catch (e) { return `(failed: ${e.message})\n${e.stdout || ''}${e.stderr || ''}`; } };
+            const sh = (cmd) => { try { return cp.execSync(cmd, { encoding: 'utf8', shell: '/bin/bash' }); } catch (e) { return `(failed: ${e.message})\n${e.stdout || ''}${e.stderr || ''}`; } };
             const fixture = process.env.FIXTURE;
 
             // Locate the open PR. Inside a workflow_call dispatched from
