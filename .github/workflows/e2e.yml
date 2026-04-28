@@ -35,11 +35,15 @@ jobs:
     name: e2e (${{ matrix.fixture }})
     # Permissions on a reusable-workflow call set the GITHUB_TOKEN scope
     # for the called workflow. e2e-fixture.yml's publish job needs
-    # id-token: write (OIDC mint) and contents: write (tag push); both
-    # have to be granted here at the caller level.
+    # id-token: write (OIDC mint), contents: write (tag push), and
+    # pull-requests: write (temporary diagnostic comment poster, #258);
+    # all have to be granted here at the caller level. Without
+    # pull-requests:write the whole workflow fails with startup_failure
+    # before any job runs.
     permissions:
       contents: write
       id-token: write
+      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
