@@ -132,7 +132,7 @@ describe('#31 polyglot fixtures', () => {
     expect(rows).toHaveLength(13);
     const byName = new Map<string, number>();
     for (const r of rows) byName.set(r.name, (byName.get(r.name) ?? 0) + 1);
-    expect(byName.get('piot-fixture-zzz-rust')).toBe(1);
+    expect(byName.get('piot-fixture-zzz-poly-rust')).toBe(1);
     expect(byName.get('piot-fixture-zzz-python')).toBe(6);
     expect(byName.get('@putitoutthere/piot-fixture-zzz-cli')).toBe(6);
   });
