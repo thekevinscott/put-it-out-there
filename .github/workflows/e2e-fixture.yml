@@ -411,7 +411,13 @@ jobs:
                 count=$(find "$tmp/extracted/package/$d" -type f | wc -l)
                 echo "  ok: package/$d/ ($count file(s))"
               else
-                echo "::error::[$pkg_name@$version] tarball declares '$d' in files[] but package/$d/ is missing or empty."
+                local_path="fixture-tree/${pkg_path}/${d}"
+                local_state="local ${local_path}: missing"
+                if [ -d "$local_path" ]; then
+                  local_count=$(find "$local_path" -type f 2>/dev/null | wc -l)
+                  local_state="local ${local_path}: present, ${local_count} file(s) — $(find "$local_path" -type f 2>/dev/null | tr '\n' ' ')"
+                fi
+                echo "::error::[$pkg_name@$version] tarball missing '$d'. ${local_state}"
                 fail=1
               fi
             done
