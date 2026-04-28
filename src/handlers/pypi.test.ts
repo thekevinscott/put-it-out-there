@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mintOidcToken, pypi, scmEnvSuffix } from './pypi.js';
-import type { Ctx } from '../types.js';
+import { readHandlerMeta, type Ctx } from '../types.js';
 
 vi.mock('node:child_process', async (orig) => {
   const actual = await orig<typeof ChildProcess>();
@@ -439,6 +439,86 @@ describe('pypi.publish', () => {
         makeCtx({ cwd: dir, artifactsRoot }),
       ),
     ).rejects.toThrow(/unauthorized|twine/i);
+    fetchSpy.mockRestore();
+  });
+
+  // Phase 2 / Idea 9: failures attach tool-version metadata so the
+  // dump-failure renderer can show "twine 5.1.0 / Python 3.12.6" in
+  // the rendered job summary. Cuts the "is this version-specific?"
+  // question that's the next obvious follow-up after a twine error.
+  it('attaches tool versions to the thrown error on twine failure', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    execMock.mockImplementation((cmd: string, args?: readonly string[]) => {
+      const a = args ?? [];
+      if (cmd === 'twine' && a[0] === '--version') {
+        return Buffer.from('twine 5.1.0');
+      }
+      if ((cmd === 'python' || cmd === 'python3') && a[0] === '--version') {
+        return Buffer.from('Python 3.12.6');
+      }
+      // The actual upload call.
+      throw Object.assign(new Error('twine exit 1'), {
+        stderr: Buffer.from('401 unauthorized'),
+      });
+    });
+    let caught: unknown;
+    try {
+      await pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, artifactsRoot, env: { PYPI_API_TOKEN: 'tok' } }),
+      );
+    } catch (err) {
+      caught = err;
+    }
+    const meta = readHandlerMeta(caught);
+    expect(meta?.toolVersions?.twine).toMatch(/twine 5\.1\.0/);
+    expect(meta?.toolVersions?.python).toMatch(/Python 3\.12\.6/);
+    fetchSpy.mockRestore();
+  });
+
+  it('attaches tool versions even when twine --version itself fails', async () => {
+    // If twine isn't on PATH, version capture should silently no-op
+    // — we still want to surface whatever versions we did manage to
+    // capture (or an empty record), not crash the failure path.
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404 }),
+    );
+    stageSdist('demo-python-sdist', 'demo-0.1.0.tar.gz');
+    execMock.mockImplementation((cmd: string, args?: readonly string[]) => {
+      const a = args ?? [];
+      if (cmd === 'twine' && a[0] === '--version') {
+        const e = new Error('twine ENOENT');
+        (e as NodeJS.ErrnoException).code = 'ENOENT';
+        throw e;
+      }
+      if ((cmd === 'python' || cmd === 'python3') && a[0] === '--version') {
+        return Buffer.from('Python 3.12.6');
+      }
+      // Twine upload fails because twine isn't on PATH; the handler
+      // already wraps ENOENT with a runner-prereqs hint.
+      const e = new Error('twine ENOENT');
+      (e as NodeJS.ErrnoException).code = 'ENOENT';
+      throw e;
+    });
+    let caught: unknown;
+    try {
+      await pypi.publish(
+        { ...basePkg(), path: dir },
+        '0.1.0',
+        makeCtx({ cwd: dir, artifactsRoot, env: { PYPI_API_TOKEN: 'tok' } }),
+      );
+    } catch (err) {
+      caught = err;
+    }
+    const meta = readHandlerMeta(caught);
+    // twine version capture failed → key absent or empty
+    expect(meta?.toolVersions?.twine).toBeFalsy();
+    // python version captured
+    expect(meta?.toolVersions?.python).toMatch(/Python 3\.12\.6/);
     fetchSpy.mockRestore();
   });
 

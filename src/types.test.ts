@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { AuthError, TransientError, normalizeTarget } from './types.js';
+import {
+  AuthError,
+  TransientError,
+  attachHandlerMeta,
+  normalizeTarget,
+  readHandlerMeta,
+} from './types.js';
 
 describe('error classes', () => {
   it('AuthError exposes its name and message', () => {
@@ -14,6 +20,34 @@ describe('error classes', () => {
     expect(e.name).toBe('TransientError');
     expect(e.message).toBe('registry 502');
     expect(e instanceof Error).toBe(true);
+  });
+});
+
+describe('handler-error meta (Phase 2 / Idea 9)', () => {
+  it('attaches and reads back tool-version metadata', () => {
+    const err = new Error('twine upload failed');
+    attachHandlerMeta(err, {
+      toolVersions: { twine: 'twine 5.1.0', python: 'Python 3.12.6' },
+    });
+    expect(readHandlerMeta(err)).toEqual({
+      toolVersions: { twine: 'twine 5.1.0', python: 'Python 3.12.6' },
+    });
+  });
+
+  it('returns undefined for an Error without attached meta', () => {
+    expect(readHandlerMeta(new Error('plain'))).toBeUndefined();
+  });
+
+  it('returns undefined for non-Error values', () => {
+    expect(readHandlerMeta('a string')).toBeUndefined();
+    expect(readHandlerMeta(undefined)).toBeUndefined();
+    expect(readHandlerMeta(null)).toBeUndefined();
+  });
+
+  it('attachHandlerMeta returns the same Error so callers can throw inline', () => {
+    const err = new Error('x');
+    const same = attachHandlerMeta(err, { toolVersions: { tool: '1.0.0' } });
+    expect(same).toBe(err);
   });
 });
 

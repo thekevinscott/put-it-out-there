@@ -25,7 +25,7 @@ import { parse as parseToml } from 'smol-toml';
 import { sanitizeArtifactName } from '../config.js';
 import { ErrorCodes } from '../error-codes.js';
 import type { Ctx, Handler, PublishResult } from '../types.js';
-import { TransientError } from '../types.js';
+import { TransientError, attachHandlerMeta } from '../types.js';
 import { buildSubprocessEnv, nonEmpty } from '../env.js';
 import { USER_AGENT } from '../version.js';
 
@@ -161,21 +161,29 @@ async function publishImpl(
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {
+    // Capture tool versions lazily on failure (Phase 2 / Idea 9).
+    // Successful publishes don't pay for the extra subprocess spawns;
+    // failed ones get "twine 5.x / Python 3.y" in the dumped summary.
+    const toolVersions = captureToolVersions();
+
     // ENOENT = twine not on PATH. The scaffolded publish job is supposed
     // to install it (setup-python + pip install twine), but an adopter
     // running an older template or a hand-rolled workflow will hit this.
     // Give them an actionable message instead of a cryptic ENOENT. #205.
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(
-        [
-          'pypi: twine not found on PATH (ENOENT).',
-          'The publish job must install it before invoking piot. Add:',
-          '  - uses: actions/setup-python@v5',
-          "    with: { python-version: '3.12' }",
-          '  - run: pip install twine',
-          'See https://thekevinscott.github.io/putitoutthere/guide/runner-prerequisites',
-        ].join('\n'),
-        { cause: err },
+      throw attachHandlerMeta(
+        new Error(
+          [
+            'pypi: twine not found on PATH (ENOENT).',
+            'The publish job must install it before invoking piot. Add:',
+            '  - uses: actions/setup-python@v5',
+            "    with: { python-version: '3.12' }",
+            '  - run: pip install twine',
+            'See https://thekevinscott.github.io/putitoutthere/guide/runner-prerequisites',
+          ].join('\n'),
+          { cause: err },
+        ),
+        { toolVersions },
       );
     }
     const stderr = (err as { stderr?: Buffer }).stderr?.toString('utf8').trim();
@@ -187,7 +195,10 @@ async function publishImpl(
     const parts = [`twine upload failed: ${base}`];
     if (stderr) parts.push(`--- stderr ---\n${stderr}`);
     if (stdout) parts.push(`--- stdout ---\n${stdout}`);
-    throw new Error(parts.join('\n'), { cause: err });
+    throw attachHandlerMeta(
+      new Error(parts.join('\n'), { cause: err }),
+      { toolVersions },
+    );
   }
 
   return {
@@ -200,6 +211,41 @@ async function publishImpl(
 
 function pypiNameFor(pkg: { name: string; pypi?: string }): string {
   return pkg.pypi ?? pkg.name;
+}
+
+/**
+ * Best-effort tool-version probe for the pypi handler. Used by the
+ * failure renderer (Phase 2 / Idea 9) so the rendered job summary
+ * shows "twine 5.1.0 / Python 3.12.6" — answers the next-obvious
+ * question after a twine error without re-running anything.
+ *
+ * Each probe is wrapped: a missing binary or a non-zero exit drops
+ * the key from the result rather than crashing the failure path.
+ * `python` is tried before `python3` because hosted runners (and
+ * `setup-python@v5`) symlink both, but environments with system
+ * Python only have `python3`.
+ */
+function captureToolVersions(): Record<string, string> {
+  const out: Record<string, string> = {};
+  out.twine = probe('twine');
+  out.python = probe('python') || probe('python3');
+  // Drop empty keys so the failure renderer doesn't show a blank row.
+  for (const k of Object.keys(out)) if (!out[k]) delete out[k];
+  return out;
+}
+
+function probe(cmd: string): string {
+  try {
+    const out = execFileSync(cmd, ['--version'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    // `String(out)` keeps the helper robust against test mocks that
+    // return a Buffer regardless of the encoding option.
+    return String(out).trim();
+  } catch {
+    return '';
+  }
 }
 
 /**

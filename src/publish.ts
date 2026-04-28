@@ -27,7 +27,7 @@ import { plan, type MatrixRow } from './plan.js';
 import { formatTag } from './tag-template.js';
 import { requireAuth } from './preflight.js';
 import { withRetry } from './retry.js';
-import type { Ctx, Handler, PublishResult } from './types.js';
+import { readHandlerMeta, type Ctx, type Handler, type PublishResult } from './types.js';
 import { dumpFailure } from './verbose.js';
 
 export interface PublishOptions {
@@ -133,6 +133,9 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
+      // Phase 2 / Idea 9: handler-attached metadata (tool versions, etc.)
+      // rides through to the failure renderer.
+      const meta = readHandlerMeta(error);
       dumpFailure(
         error,
         {
@@ -142,6 +145,7 @@ export async function publish(opts: PublishOptions): Promise<PublishOutput> {
           stdout: '',
           stderr: error.message,
           exitCode: -1,
+          ...(meta?.toolVersions ? { toolVersions: meta.toolVersions } : {}),
         },
         // Thread ctx.env through so handler-injected credentials (OIDC-
         // minted twine/npm/crates tokens that live only on ctx.env, not
