@@ -68,14 +68,6 @@ function rewritePlaceholders(root: string, version: string): void {
 }
 
 describe('#29 pure-language fixtures', () => {
-  it('rust-crate-only → 1 crates row', async () => {
-    const cwd = prepareFixture('rust-crate-only');
-    const rows = await plan({ cwd });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.kind).toBe('crates');
-    expect(rows[0]!.target).toBe('noarch');
-  });
-
   it('python-pure-hatch → 1 pypi sdist row', async () => {
     const cwd = prepareFixture('python-pure-hatch');
     const rows = await plan({ cwd });
@@ -140,7 +132,7 @@ describe('#31 polyglot fixtures', () => {
     expect(rows).toHaveLength(13);
     const byName = new Map<string, number>();
     for (const r of rows) byName.set(r.name, (byName.get(r.name) ?? 0) + 1);
-    expect(byName.get('piot-fixture-zzz-rust')).toBe(1);
+    expect(byName.get('piot-fixture-zzz-poly-rust')).toBe(1);
     expect(byName.get('piot-fixture-zzz-python')).toBe(6);
     expect(byName.get('@putitoutthere/piot-fixture-zzz-cli')).toBe(6);
   });

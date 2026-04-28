@@ -113,3 +113,37 @@ export class AuthError extends Error {
 export class TransientError extends Error {
   override readonly name = 'TransientError';
 }
+
+/**
+ * Diagnostic metadata a handler can attach to a thrown error so the
+ * failure renderer (`verbose.ts:dumpFailure`) can surface tool versions
+ * and other context without requiring every handler to plumb its own
+ * dump call. Phase 2 / Idea 9.
+ *
+ * Attached via `attachHandlerMeta(err, ...)` and read at the publish
+ * boundary via `readHandlerMeta(err)`.
+ */
+export interface HandlerErrorMeta {
+  /** `{tool: "tool --version output"}`. Examples: `twine`, `python`,
+   *  `npm`, `cargo`. Capture is best-effort — keys may be absent if
+   *  the tool isn't on PATH or its version probe failed. */
+  toolVersions?: Record<string, string>;
+}
+
+const HANDLER_META_KEY = '__piotHandlerMeta';
+
+/** Attach handler-failure metadata to an Error and return the same
+ *  Error (so callers can `throw attachHandlerMeta(new Error(...), {...})`). */
+export function attachHandlerMeta<E extends Error>(err: E, meta: HandlerErrorMeta): E {
+  (err as E & { [HANDLER_META_KEY]?: HandlerErrorMeta })[HANDLER_META_KEY] = meta;
+  return err;
+}
+
+/** Read handler-failure metadata from a possibly-Error value. Returns
+ *  undefined for non-Error values, plain Errors, and Errors without
+ *  attached meta. */
+export function readHandlerMeta(value: unknown): HandlerErrorMeta | undefined {
+  if (!(value instanceof Error)) return undefined;
+  const carrier = value as Error & { [HANDLER_META_KEY]?: HandlerErrorMeta };
+  return carrier[HANDLER_META_KEY];
+}

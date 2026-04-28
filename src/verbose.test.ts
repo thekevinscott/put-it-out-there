@@ -186,6 +186,114 @@ describe('dumpFailure: redaction', () => {
   });
 });
 
+// Phase 3 / Idea 6. The job-summary markdown ($GITHUB_STEP_SUMMARY) is
+// auth-gated on private repos and not always visible to a foreign agent
+// helping debug from outside. GitHub workflow-command annotations
+// emitted via stdout (`::error::…`) DO render on the public run-summary
+// page, so the failure surface is reachable without auth. Carry the
+// error code + handler/package + first error line.
+describe('dumpFailure: GHA workflow-command annotation', () => {
+  let stdoutWrites: string[] = [];
+  let restoreWrite: (() => void) | undefined;
+
+  beforeEach(() => {
+    stdoutWrites = [];
+    const original = process.stdout.write.bind(process.stdout);
+    // Replace with a capturer that records the chunk and returns true.
+    // We don't need to forward to the real stream — the dumpFailure
+    // tests only check that ::error:: lines are emitted.
+    process.stdout.write = (chunk) => {
+      const s = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+      stdoutWrites.push(s);
+      return true;
+    };
+    restoreWrite = () => {
+      process.stdout.write = original;
+    };
+    process.env.GITHUB_ACTIONS = 'true';
+  });
+
+  afterEach(() => {
+    restoreWrite?.();
+    delete process.env.GITHUB_ACTIONS;
+  });
+
+  it('emits a single ::error:: annotation when running in GHA', () => {
+    const logDest = new BufStream();
+    const log = createLogger({ stream: logDest, pretty: false });
+    dumpFailure(new Error('publish failed'), baseCtx(), { log });
+    const annotations = stdoutWrites.filter((s) => s.startsWith('::error::'));
+    expect(annotations).toHaveLength(1);
+  });
+
+  it('annotation tags handler/package and includes the first message line', () => {
+    const logDest = new BufStream();
+    const log = createLogger({ stream: logDest, pretty: false });
+    dumpFailure(new Error('publish failed: 401 unauthorized'), baseCtx(), { log });
+    const line = stdoutWrites.find((s) => s.startsWith('::error::')) ?? '';
+    expect(line).toContain('crates/demo');
+    expect(line).toContain('401 unauthorized');
+  });
+
+  it('annotation includes the PIOT_ error code when present in the error message', () => {
+    // Registry handlers may tag their auth-failure error message with
+    // a `[PIOT_*]` code; the annotation should surface the bracketed
+    // code so external observers can fingerprint on it without needing
+    // to read the full markdown.
+    const logDest = new BufStream();
+    const log = createLogger({ stream: logDest, pretty: false });
+    dumpFailure(
+      new Error('pypi: no auth available [PIOT_AUTH_NO_TOKEN]'),
+      baseCtx({ handler: 'pypi', package: 'demo-pkg' }),
+      { log },
+    );
+    const line = stdoutWrites.find((s) => s.startsWith('::error::')) ?? '';
+    expect(line).toContain('PIOT_AUTH_NO_TOKEN');
+  });
+
+  it('redacts env-matched secrets from the annotation body', () => {
+    process.env.PYPI_API_TOKEN = 'pypi-tok-zzz';
+    const logDest = new BufStream();
+    const log = createLogger({ stream: logDest, pretty: false });
+    dumpFailure(
+      new Error('publish: leaked pypi-tok-zzz'),
+      baseCtx(),
+      { log },
+    );
+    const line = stdoutWrites.find((s) => s.startsWith('::error::')) ?? '';
+    expect(line).not.toContain('pypi-tok-zzz');
+  });
+
+  it('no-ops outside GitHub Actions', () => {
+    delete process.env.GITHUB_ACTIONS;
+    const logDest = new BufStream();
+    const log = createLogger({ stream: logDest, pretty: false });
+    dumpFailure(new Error('local run'), baseCtx(), { log });
+    const annotations = stdoutWrites.filter((s) => s.startsWith('::error::'));
+    expect(annotations).toEqual([]);
+  });
+
+  it('keeps the annotation to a single line (encodes embedded newlines)', () => {
+    // GitHub annotations are line-oriented; an embedded newline would
+    // truncate the annotation at the break point. The dumpFailure
+    // implementation must collapse to one line (either by encoding
+    // %0A or by taking the first line only).
+    const logDest = new BufStream();
+    const log = createLogger({ stream: logDest, pretty: false });
+    dumpFailure(
+      new Error('first line\nsecond line\nthird line'),
+      baseCtx(),
+      { log },
+    );
+    const line = stdoutWrites.find((s) => s.startsWith('::error::')) ?? '';
+    // Exactly one trailing newline (the line terminator), no embedded
+    // bare newlines in the annotation body itself.
+    expect(line.endsWith('\n')).toBe(true);
+    const body = line.slice(0, -1); // strip terminator
+    expect(body).not.toContain('\n');
+  });
+});
+
 describe('dumpFailure: size cap (4MB)', () => {
   it('truncates oversized stdout and notes the truncation', () => {
     const big = 'x'.repeat(5 * 1024 * 1024);

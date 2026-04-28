@@ -6,7 +6,7 @@ version = 1
 # The v0 success criterion (plan.md §25.3 #2).
 
 [[package]]
-name = "piot-fixture-zzz-rust"
+name = "piot-fixture-zzz-poly-rust"
 kind = "crates"
 path = "packages/rust"
 globs = ["packages/rust/**"]
@@ -25,7 +25,7 @@ targets = [
   "aarch64-apple-darwin",
   "x86_64-pc-windows-msvc",
 ]
-depends_on = ["piot-fixture-zzz-rust"]
+depends_on = ["piot-fixture-zzz-poly-rust"]
 first_version = "__VERSION__"
 
 [[package]]
@@ -41,5 +41,5 @@ targets = [
   "aarch64-apple-darwin",
   "x86_64-pc-windows-msvc",
 ]
-depends_on = ["piot-fixture-zzz-rust"]
+depends_on = ["piot-fixture-zzz-poly-rust"]
 first_version = "__VERSION__"

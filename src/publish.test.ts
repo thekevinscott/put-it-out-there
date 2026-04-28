@@ -9,13 +9,13 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { publish } from './publish.js';
-import { TransientError, type Handler } from './types.js';
+import { TransientError, attachHandlerMeta, type Handler } from './types.js';
 
 let repo: string;
 function git(args: string[]): string {
@@ -247,6 +247,39 @@ describe('publish: handler failure', () => {
     ).rejects.toThrow(/500|registry/);
     // No tag created on failure.
     expect(git(['tag', '-l'])).toBe('');
+  });
+
+  // Phase 2 / Idea 9: tool-version metadata attached by a handler must
+  // reach the rendered job-summary markdown via FailureContext, so a
+  // foreign agent reading the rendered failure can see "what version
+  // of twine/npm/cargo was running" without re-running anything.
+  it('threads handler-attached tool versions into the failure dump', async () => {
+    // Wire up a temp $GITHUB_STEP_SUMMARY so we can inspect the markdown.
+    const summaryPath = join(repo, '_step_summary.md');
+    writeFileSync(summaryPath, '', 'utf8');
+    const prev = process.env.GITHUB_STEP_SUMMARY;
+    process.env.GITHUB_STEP_SUMMARY = summaryPath;
+
+    try {
+      const err = new Error('twine upload failed');
+      attachHandlerMeta(err, {
+        toolVersions: { twine: 'twine 5.1.0', python: 'Python 3.12.6' },
+      });
+      const handler = makeHandler({
+        publish: vi.fn().mockRejectedValue(err),
+      });
+      await expect(
+        publish({ cwd: repo, handlerFor: () => handler }),
+      ).rejects.toThrow(/twine upload failed/);
+
+      const md = readFileSync(summaryPath, 'utf8');
+      expect(md).toContain('Tool versions');
+      expect(md).toContain('twine 5.1.0');
+      expect(md).toContain('Python 3.12.6');
+    } finally {
+      if (prev === undefined) delete process.env.GITHUB_STEP_SUMMARY;
+      else process.env.GITHUB_STEP_SUMMARY = prev;
+    }
   });
 });
 

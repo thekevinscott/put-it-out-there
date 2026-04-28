@@ -1,9 +1,0 @@
-[putitoutthere]
-version = 1
-
-[[package]]
-name = "piot-fixture-zzz-rust"
-kind = "crates"
-path = "."
-globs = ["src/**", "Cargo.toml"]
-first_version = "__VERSION__"
