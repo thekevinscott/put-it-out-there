@@ -230,7 +230,6 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -437,7 +436,27 @@ jobs:
               continue
             fi
             echo "[$pkg_name@$version] verifying tarball contains: ${dirs[*]}"
-            tarball_url=$(npm view "$pkg_name@$version" dist.tarball)
+            # Retry npm view: the registry packument metadata that
+            # `npm view <pkg>@<version>` reads is updated asynchronously
+            # after a successful publish. Verify runs immediately after
+            # publish, so the first call usually 404s while the tarball
+            # itself is already live on the CDN. Backoff: 0s, 5s, 10s,
+            # 20s, 40s — typical lag is under 30s.
+            tarball_url=""
+            for attempt in 1 2 3 4 5; do
+              tarball_url=$(npm view "$pkg_name@$version" dist.tarball 2>/dev/null || true)
+              if [ -n "$tarball_url" ]; then break; fi
+              if [ "$attempt" -lt 5 ]; then
+                sleep_for=$((attempt == 1 ? 5 : (attempt - 1) * 10))
+                echo "  packument lag: npm view returned empty (attempt $attempt/5); retrying in ${sleep_for}s"
+                sleep "$sleep_for"
+              fi
+            done
+            if [ -z "$tarball_url" ]; then
+              echo "::error::[$pkg_name@$version] npm view never returned a tarball URL after 5 attempts (~75s of backoff). Either the publish didn't actually publish, or registry packument propagation is much slower than expected."
+              fail=1
+              continue
+            fi
             tmp=$(mktemp -d)
             curl -fsSL -o "$tmp/pkg.tgz" "$tarball_url"
             mkdir "$tmp/extracted"
@@ -461,50 +480,6 @@ jobs:
             rm -rf "$tmp"
           done <<< "$rows"
           exit "$fail"
-
-      # TEMPORARY DIAGNOSTIC (#258): post all the state to a PR comment
-      # so it's actually readable via the GitHub MCP. Workflow logs and
-      # annotation text are auth-walled in the unauth API; PR comments
-      # aren't. Strip alongside the other diagnostic steps.
-      - name: Post diagnostic state as PR comment
-        if: always() && contains(needs.plan.outputs.matrix, '"kind":"npm"')
-        uses: actions/github-script@v7
-        env:
-          FIXTURE: ${{ inputs.fixture }}
-        with:
-          script: |
-            const cp = require('child_process');
-            const sh = (cmd) => { try { return cp.execSync(cmd, { encoding: 'utf8' }); } catch (e) { return `(failed: ${e.message})\n${e.stdout || ''}${e.stderr || ''}`; } };
-            const fixture = process.env.FIXTURE;
-            const tree = sh('find fixture-tree -maxdepth 4 -not -path "*/node_modules/*" -not -path "*/.git/*" 2>&1');
-            const pkgJsons = sh('find fixture-tree -name package.json -not -path "*/node_modules/*" -not -path "*/.git/*" -exec sh -c \'echo "=== $1 ==="; cat "$1"\' _ {} \\; 2>&1').slice(0, 4000);
-            const packs = sh('for d in fixture-tree fixture-tree/packages/*; do if [ -f "$d/package.json" ]; then echo "=== $d (npm pack --dry-run) ==="; (cd "$d" && npm pack --dry-run 2>&1 | head -25); fi; done').slice(0, 4000);
-            const body = [
-              `**Diagnostic [\`${fixture}\`] — post-publish state**`,
-              '',
-              '### fixture-tree (excl node_modules, .git)',
-              '```',
-              tree.slice(0, 3000),
-              '```',
-              '',
-              '### package.json contents',
-              '```json',
-              pkgJsons,
-              '```',
-              '',
-              '### npm pack --dry-run (post-publish, same dir engine published from)',
-              '```',
-              packs,
-              '```',
-            ].join('\n');
-            const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-              owner: context.repo.owner, repo: context.repo.repo, commit_sha: context.sha,
-            });
-            if (prs.data.length === 0) { core.info('no PR for sha; skipping comment'); return; }
-            await github.rest.issues.createComment({
-              owner: context.repo.owner, repo: context.repo.repo,
-              issue_number: prs.data[0].number, body,
-            });
 
   # NOTE: the caller-side `pypi-publish` job lives in `.github/workflows/e2e.yml`,
   # not here. `pypa/gh-action-pypi-publish` aborts when invoked from inside
