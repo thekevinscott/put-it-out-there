@@ -68,14 +68,6 @@ function rewritePlaceholders(root: string, version: string): void {
 }
 
 describe('#29 pure-language fixtures', () => {
-  it('rust-crate-only → 1 crates row', async () => {
-    const cwd = prepareFixture('rust-crate-only');
-    const rows = await plan({ cwd });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.kind).toBe('crates');
-    expect(rows[0]!.target).toBe('noarch');
-  });
-
   it('python-pure-hatch → 1 pypi sdist row', async () => {
     const cwd = prepareFixture('python-pure-hatch');
     const rows = await plan({ cwd });

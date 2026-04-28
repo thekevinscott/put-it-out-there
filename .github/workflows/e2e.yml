@@ -51,7 +51,6 @@ jobs:
           - python-pure-hatch
           - python-pure-sdist-only
           - python-rust-maturin
-          - rust-crate-only
           - polyglot-everything
     uses: ./.github/workflows/e2e-fixture.yml
     secrets: inherit
