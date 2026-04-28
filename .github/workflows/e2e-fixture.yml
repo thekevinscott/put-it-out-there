@@ -476,6 +476,41 @@ jobs:
             const cp = require('child_process');
             const sh = (cmd) => { try { return cp.execSync(cmd, { encoding: 'utf8' }); } catch (e) { return `(failed: ${e.message})\n${e.stdout || ''}${e.stderr || ''}`; } };
             const fixture = process.env.FIXTURE;
+
+            // Locate the open PR. Inside a workflow_call dispatched from
+            // a pull_request trigger, the PR number is in
+            // `context.payload.pull_request.number` (most reliable). On
+            // push events no PR is in the payload — fall back to
+            // listPullRequestsAssociatedWithCommit, which finds an open PR
+            // whose head matches `context.sha`. Logs both attempts so the
+            // step's own log surfaces why a comment didn't post.
+            async function findPRNumber() {
+              const fromPayload = context.payload?.pull_request?.number;
+              if (fromPayload) {
+                core.info(`PR #${fromPayload} from event payload (${context.eventName})`);
+                return fromPayload;
+              }
+              const { data } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: context.sha,
+              });
+              const open = data.find((pr) => pr.state === 'open');
+              if (open) {
+                core.info(`PR #${open.number} from listPullRequestsAssociatedWithCommit`);
+                return open.number;
+              }
+              if (data.length > 0) {
+                core.info(`PR #${data[0].number} (closed) from listPullRequestsAssociatedWithCommit`);
+                return data[0].number;
+              }
+              core.warning(`No PR found for sha ${context.sha} (event=${context.eventName}); skipping comment`);
+              return null;
+            }
+
+            const issue_number = await findPRNumber();
+            if (issue_number == null) return;
+
             const tree = sh('find fixture-tree -maxdepth 4 -not -path "*/node_modules/*" -not -path "*/.git/*" 2>&1');
             const pkgJsons = sh('find fixture-tree -name package.json -not -path "*/node_modules/*" -not -path "*/.git/*" -exec sh -c \'echo "=== $1 ==="; cat "$1"\' _ {} \\; 2>&1').slice(0, 4000);
             const packs = sh('for d in fixture-tree fixture-tree/packages/*; do if [ -f "$d/package.json" ]; then echo "=== $d (npm pack --dry-run) ==="; (cd "$d" && npm pack --dry-run 2>&1 | head -25); fi; done').slice(0, 4000);
@@ -497,14 +532,13 @@ jobs:
               packs,
               '```',
             ].join('\n');
-            const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-              owner: context.repo.owner, repo: context.repo.repo, commit_sha: context.sha,
-            });
-            if (prs.data.length === 0) { core.info('no PR for sha; skipping comment'); return; }
             await github.rest.issues.createComment({
-              owner: context.repo.owner, repo: context.repo.repo,
-              issue_number: prs.data[0].number, body,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body,
             });
+            core.info(`Posted diagnostic comment to PR #${issue_number}`);
 
   # NOTE: the caller-side `pypi-publish` job lives in `.github/workflows/e2e.yml`,
   # not here. `pypa/gh-action-pypi-publish` aborts when invoked from inside
