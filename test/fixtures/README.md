@@ -10,7 +10,7 @@ One package, one publish per run.
 
 | Path                      | Kind   | Build       | Package                                | Notes                |
 |---------------------------|--------|-------------|----------------------------------------|----------------------|
-| `js-vanilla/`             | npm    | vanilla     | `piot-fixture-zzz-cli`                 | Live e2e canary      |
+| `js-vanilla/`             | npm    | vanilla     | `@putitoutthere/piot-fixture-zzz-js-vanilla` | Live e2e canary      |
 | `python-pure-hatch/`      | pypi   | hatch       | `piot-fixture-zzz-python-hatch`        | sdist + pure wheel   |
 | `python-pure-sdist-only/` | pypi   | setuptools  | `piot-fixture-zzz-python-sdist`        | sdist only, no wheel |
 
@@ -29,9 +29,9 @@ One package, one publish per run.
 | Path                   | Packages                                                                  |
 |------------------------|---------------------------------------------------------------------------|
 | `js-python-no-rust/`   | pypi `-python-no-rust` + npm `@putitoutthere/-js-no-rust` — SDK shape, no Rust |
-| `polyglot-everything/` | crates `-rust` + pypi `-python` + npm `@putitoutthere/-cli` (bundled-cli) — dirsql shape |
+| `polyglot-everything/` | crates `-rust` + pypi `-python` + multi-mode npm `@putitoutthere/-cli` (bundled-cli + napi-rs `.node`, both selected via `optionalDependencies`) — dirsql shape |
 
-`polyglot-everything/` is the v0 success criterion (plan.md §25.3 #2); it covers cross-handler interaction and `depends_on` cascade end-to-end. Single-mode polyglot variants (rust+python, rust+js-napi, rust+js-bundled) were removed: cascade ordering is pure-function logic covered by unit tests, and each underlying handler is exercised by its single-mode fixture.
+`polyglot-everything/` is the v0 success criterion (plan.md §25.3 #2); it covers cross-handler interaction, `depends_on` cascade, and the multi-mode npm `build` array end-to-end. Single-mode polyglot variants (rust+python, rust+js-napi, rust+js-bundled) were removed: cascade ordering is pure-function logic covered by unit tests, and each underlying handler is exercised by its single-mode fixture (`js-napi/`, `js-bundled-cli/`).
 
 ## Version placeholder
 
