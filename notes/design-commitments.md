@@ -94,11 +94,10 @@ If yes, the design is wrong. Move the work into the reusable workflow.
 ## Provenance
 
 The original commitments (1–6) were written up in response to an external
-evaluation (`thekevinscott/dirsql#159`) that surfaced pressure to expand
-scope. The April 2026 revision — Scope rewrite to "reusable workflow",
-strengthened non-goal #4, and new non-goals 7–10 — followed a coaxer
-integration session where a consumer's hand-written `release.yml`
-silently broke after an action-version bump. Capturing the rule that
+evaluation that surfaced pressure to expand scope. The April 2026 revision
+— Scope rewrite to "reusable workflow", strengthened non-goal #4, and new
+non-goals 7–10 — followed a consumer integration session where a hand-written
+`release.yml` silently broke after an action-version bump. Capturing the rule that
 `putitoutthere` ships the workflow itself, and that the CLI and JS
 action are internal, prevents the integration surface from drifting
 back to "consumer maintains a 100-line release.yml against a

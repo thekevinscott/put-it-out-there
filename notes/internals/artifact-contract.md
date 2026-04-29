@@ -88,9 +88,9 @@ Notes:
   `aarch64-apple-darwin`, etc.) for maturin / napi / bundled-cli rows.
 - **Slashes in `<pkg.name>` are encoded.** `actions/upload-artifact@v7`
   forbids `/` in artifact names, so the planner encodes each `/` to
-  `__` before emitting `artifact_name`. A package named `py/cachetta`
-  produces `artifacts/py__cachetta-sdist/…` — one flat directory, not
-  a nested `py/cachetta-sdist/`. The encoding is automatic; pass the
+  `__` before emitting `artifact_name`. A package named `py/foo`
+  produces `artifacts/py__foo-sdist/…` — one flat directory, not
+  a nested `py/foo-sdist/`. The encoding is automatic; pass the
   matrix `artifact_name` field through to `upload-artifact` verbatim
   (as the [worked examples](#worked-examples) do) and the round-trip
   works. piot's config loader rejects `__` in `pkg.name` so the
@@ -175,7 +175,7 @@ When the completeness check fails:
 
 ```
 putitoutthere: Artifact completeness check failed:
-  py/cachetta: sdist: missing artifact directory py__cachetta-sdist/
+  py/foo: sdist: missing artifact directory py__foo-sdist/
 ```
 
 Walk it back through the flow:

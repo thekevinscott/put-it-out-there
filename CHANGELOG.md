@@ -13,7 +13,7 @@ are prefixed `**BREAKING**` and link to the matching section in
 ### Added
 
 - **`PIOT_PUBLISH_EMPTY_PLAN` error code.** Surfaced when `publish` is invoked with an empty matrix. Joins `PIOT_AUTH_NO_TOKEN` in the stable error-code vocabulary; foreign agents debugging a failed publish can fingerprint on the code without parsing prose.
-- **`kind = "npm"` `build` accepts an array of entries with consumer-defined platform-package name templates** (#dirsql). For packages that ship both a napi-rs Node addon and a CLI binary from the same npm package (the `@swc/core` / dirsql shape), declare `build = [{ mode = "napi", name = "@scope/lib-{triple}" }, { mode = "bundled-cli", name = "@scope/cli-{triple}" }]`. Each entry contributes its own per-platform package family; the main package's `optionalDependencies` spans both. Entries can be bare mode strings (`"napi"`, defaults to `{name}-{triple}` template) or `{ mode, name }` objects. Variables surfaced in `name` templates: `{name}`, `{scope}`, `{base}`, `{triple}`, `{mode}`. `{version}` is intentionally not surfaced. Single-mode string form (`build = "napi"`) preserved byte-for-byte — same artifact-name layout, same platform-package names, no migration pressure on existing consumers. See [README → Recipes → Multi-mode npm family](./README.md#multi-mode-npm-family) and [MIGRATIONS.md](./MIGRATIONS.md#npm-build-accepts-array-of-entries).
+- **`kind = "npm"` `build` accepts an array of entries with consumer-defined platform-package name templates.** For packages that ship both a napi-rs Node addon and a CLI binary from the same npm package (the `@swc/core` shape), declare `build = [{ mode = "napi", name = "@scope/lib-{triple}" }, { mode = "bundled-cli", name = "@scope/cli-{triple}" }]`. Each entry contributes its own per-platform package family; the main package's `optionalDependencies` spans both. Entries can be bare mode strings (`"napi"`, defaults to `{name}-{triple}` template) or `{ mode, name }` objects. Variables surfaced in `name` templates: `{name}`, `{scope}`, `{base}`, `{triple}`, `{mode}`. `{version}` is intentionally not surfaced. Single-mode string form (`build = "napi"`) preserved byte-for-byte — same artifact-name layout, same platform-package names, no migration pressure on existing consumers. See [README → Recipes → Multi-mode npm family](./README.md#multi-mode-npm-family) and [MIGRATIONS.md](./MIGRATIONS.md#npm-build-accepts-array-of-entries).
 
 ### Changed
 
@@ -82,7 +82,7 @@ are prefixed `**BREAKING**` and link to the matching section in
   — which then ran `npm publish` from a fresh checkout and shipped
   tarballs missing the compiled output. Any consumer whose
   `package.json` declared `"files": ["dist", ...]` would publish a
-  broken artifact (caught in the wild as `cachetta@0.3.1`/`0.3.2`).
+  broken artifact (caught in the wild on a downstream consumer).
   The publish job now mirrors what a developer running `npm publish`
   locally would do: detect the lockfile, install deps, run `npm run
   build --if-present` per npm package path. napi / bundled-cli
@@ -155,19 +155,19 @@ are prefixed `**BREAKING**` and link to the matching section in
   [MIGRATIONS.md](./MIGRATIONS.md#scaffolded-releaseyml-now-forwards-github_token).
 - **`/` in `[[package]].name` is now safe — planner encodes it for
   `actions/upload-artifact@v4`** (#230). Polyglot-monorepo grouping
-  shapes (e.g. `name = "py/cachetta"`, `"js/cachetta"`) used to
+  shapes (e.g. `name = "py/foo"`, `"js/foo"`) used to
   produce `artifact_name` values containing `/`, which
   `actions/upload-artifact@v4` rejects with
   `The artifact name is not valid: ... Contains the following character: Forward slash /`,
   failing the build job before piot ever ran. The planner now encodes
-  each `/` to `__` in `artifact_name` (so `py/cachetta` →
-  `py__cachetta-sdist`) and config validation reserves `__` in
+  each `/` to `__` in `artifact_name` (so `py/foo` →
+  `py__foo-sdist`) and config validation reserves `__` in
   `pkg.name` so the round-trip stays unambiguous. Other
   upload-artifact-forbidden characters (`\`, `:`, `<`, `>`, `|`,
   `*`, `?`, `"`) are now rejected at config load. Read sites
   (`publish`, `doctor`, `preflight`, `completeness`) consume
-  `artifact_name` verbatim and need no changes; consumers running
-  the `cachetta#26` encode/decode workaround should remove it once
+  `artifact_name` verbatim and need no changes; consumers running a
+  prior `/`-encoding workaround should remove it once
   they upgrade. See [MIGRATIONS.md](./MIGRATIONS.md#package-names-with--no-longer-need-an-encode-decode-workaround) and
   [Artifact contract → notes](./notes/internals/artifact-contract.md#naming-convention-reference).
 - **Documentation accuracy pass** (#231). A docs-vs-code audit caught
