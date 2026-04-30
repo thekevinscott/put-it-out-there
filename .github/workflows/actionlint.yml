@@ -50,3 +50,28 @@ jobs:
         run: |
           bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           ./actionlint -color
+
+      # Structural-safety invariant for the PR-time build-check path
+      # (issue #272). `build.yml` and `_matrix.yml` must never grow
+      # `id-token: write` — that's what makes it impossible for a
+      # build-check invocation to inadvertently mint an OIDC token
+      # capable of publishing. Any future patch that adds OIDC there
+      # belongs in a new file on the publish path, not these.
+      - name: Assert build-check path has no id-token permission
+        run: |
+          set -euo pipefail
+          # Anchor at column 0 with optional indent so YAML declarations
+          # (`  id-token: write`) match while in-comment mentions
+          # (`# ... id-token: write ...`) do not. The constants in this
+          # check are the names of the two files that constitute the
+          # build-check path; do not generalise.
+          violations=0
+          for f in .github/workflows/build.yml .github/workflows/_matrix.yml; do
+            if grep -nE '^[[:space:]]+id-token[[:space:]]*:[[:space:]]*write' "$f"; then
+              echo "::error file=$f::id-token: write is forbidden on the build-check path (issue #272)"
+              violations=$((violations + 1))
+            fi
+          done
+          if [ "$violations" -ne 0 ]; then
+            exit 1
+          fi
