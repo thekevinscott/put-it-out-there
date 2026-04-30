@@ -109,7 +109,7 @@ of entries to publish multiple per-platform package families from a
 single main package — for example, a napi-rs Node addon plus a CLI
 binary, both selected via `optionalDependencies` on a shared top-level
 package. Each entry has a `mode` (`napi` / `bundled-cli`) and an
-optional `name` template (e.g. `"@dirsql/lib-{triple}"`) that the
+optional `name` template (e.g. `"@scope/lib-{triple}"`) that the
 consumer fully controls. The previous single-mode string form is
 preserved.
 
@@ -143,8 +143,8 @@ families separate:
 
 ```
 artifacts/
-  dirsql-napi-linux-x64-gnu/         # napi family
-  dirsql-bundled-cli-linux-x64-gnu/  # bundled-cli family
+  my-cli-napi-linux-x64-gnu/         # napi family
+  my-cli-bundled-cli-linux-x64-gnu/  # bundled-cli family
 ```
 
 The build job for a multi-mode row writes to
@@ -184,7 +184,7 @@ emitted `artifact_path: package.json` for noarch npm rows, so the
 build job's compile output was never uploaded — and the publish job's
 fresh checkout had no compiled files. `npm publish` doesn't validate
 `files` content, so the broken artifact reached the registry. Caught
-in the wild as `cachetta@0.3.1`/`0.3.2`. The publish job now installs
+in the wild on a downstream consumer. The publish job now installs
 deps and runs `npm run build --if-present` per npm package path
 before invoking the engine — the same logic the build job already
 runs, just at the point where it actually matters.
@@ -707,7 +707,7 @@ reusable workflow internally pins:
 - `actions/download-artifact@v4`
 - `PyO3/maturin-action@v1`
 
-If a consumer was running newer majors (e.g. coaxer hit
+If a consumer was running newer majors (e.g. one consumer hit
 `download-artifact@v8` defaults that broke the artifact-naming
 contract), the reusable workflow standardises everyone on the
 known-tested versions.
@@ -806,12 +806,12 @@ putitoutthere plan --json | jq '.[] | {name, artifact_name, artifact_path}'
 Expect every `artifact_path` to be a plain directory (no `*`):
 
 ```json
-{ "name": "py/cachetta", "artifact_name": "py__cachetta-sdist", "artifact_path": "py/cachetta/dist" }
+{ "name": "py/foo", "artifact_name": "py__foo-sdist", "artifact_path": "py/foo/dist" }
 ```
 
 After the next release run, the `actions/upload-artifact@v4` step
-uploads `py/cachetta/dist/` contents flat under
-`artifacts/py__cachetta-sdist/` (no nested `packages/python/dist/`
+uploads `py/foo/dist/` contents flat under
+`artifacts/py__foo-sdist/` (no nested `packages/python/dist/`
 prefix), and the publish step finds the sdist immediately.
 
 ### Scaffolded `release.yml` now forwards `GITHUB_TOKEN`
@@ -901,8 +901,7 @@ upstream.
 
 - **None for repos with slash-free `pkg.name`** — `artifact_name`
   is byte-identical to the previous version.
-- **Repos that ran the [`cachetta#26`-style](https://github.com/thekevinscott/cachetta/pull/26)
-  encode/decode workaround should remove it.** The planner now
+- **Repos that ran a prior `/`-encoding workaround should remove it.** The planner now
   does the encoding natively; leaving the workaround in place
   produces double-encoded names like `py____foo-sdist`, which the
   publish-side reader will treat as a missing artifact.
@@ -950,15 +949,15 @@ putitoutthere plan --json | jq '.[].artifact_name'
 
 Expect every emitted `artifact_name` to contain only ASCII letters,
 digits, `-`, `_`, and `.` — no `/` and no other forbidden chars.
-For a repo with `name = "py/cachetta"`:
+For a repo with `name = "py/foo"`:
 
 ```
-"py__cachetta-sdist"
-"py__cachetta-wheel-x86_64-unknown-linux-gnu"
+"py__foo-sdist"
+"py__foo-wheel-x86_64-unknown-linux-gnu"
 ```
 
 After the next release, the build job's `actions/upload-artifact@v4`
-step uploads under `py__cachetta-sdist/` (a single flat directory
+step uploads under `py__foo-sdist/` (a single flat directory
 under `artifacts/`), and piot's publish-side reader consumes the
 same path.
 

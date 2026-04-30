@@ -389,17 +389,17 @@ registration (a policy on `my-cli` does not cover
 For a package that is both a napi-rs Node addon (a `.node` library) **and**
 a CLI binary, declare `build` as an array. Each entry contributes its own
 per-platform family; the main package's `optionalDependencies` spans both.
-The `@swc/core` / dirsql distribution shape.
+The `@swc/core` distribution shape.
 
 ```toml
 [[package]]
-name    = "dirsql"
+name    = "my-cli"
 kind    = "npm"
 path    = "packages/ts"
-globs   = ["packages/ts/**", "crates/dirsql/**"]
+globs   = ["packages/ts/**", "crates/my-cli/**"]
 build   = [
-  { mode = "napi",        name = "@dirsql/lib-{triple}" },
-  { mode = "bundled-cli", name = "@dirsql/cli-{triple}" },
+  { mode = "napi",        name = "@my-cli/lib-{triple}" },
+  { mode = "bundled-cli", name = "@my-cli/cli-{triple}" },
 ]
 targets = [
   "linux-x64-gnu",
@@ -414,8 +414,8 @@ template** for its platform packages. Variables:
 | Variable    | Resolves to                                                       |
 |-------------|-------------------------------------------------------------------|
 | `{name}`    | The main package's npm name (`pkg.npm` if set, else `pkg.name`).  |
-| `{scope}`   | Scope without `@` for scoped names (e.g. `dirsql`); `""` if unscoped. |
-| `{base}`    | Name without scope (e.g. `core` for `@dirsql/core`).              |
+| `{scope}`   | Scope without `@` for scoped names (e.g. `myorg`); `""` if unscoped. |
+| `{base}`    | Name without scope (e.g. `core` for `@myorg/core`).              |
 | `{triple}`  | Target triple as written in `targets` — required in the template. |
 | `{mode}`    | The entry's mode (`napi` / `bundled-cli`).                        |
 
@@ -437,11 +437,11 @@ only applies when `build` has more than one entry.
 - All entries must produce distinct platform-package name templates.
 
 Each platform package across **every** family needs its own npm
-trusted-publisher registration. For the dirsql config above, that's
-`@dirsql/lib-linux-x64-gnu`, `@dirsql/lib-darwin-arm64`,
-`@dirsql/lib-win32-x64-msvc`, `@dirsql/cli-linux-x64-gnu`,
-`@dirsql/cli-darwin-arm64`, `@dirsql/cli-win32-x64-msvc` — six total,
-one per platform package, plus the top-level `dirsql`.
+trusted-publisher registration. For the config above, that's
+`@my-cli/lib-linux-x64-gnu`, `@my-cli/lib-darwin-arm64`,
+`@my-cli/lib-win32-x64-msvc`, `@my-cli/cli-linux-x64-gnu`,
+`@my-cli/cli-darwin-arm64`, `@my-cli/cli-win32-x64-msvc` — six total,
+one per platform package, plus the top-level `my-cli`.
 
 ### Rust CLI inside a PyPI wheel
 
