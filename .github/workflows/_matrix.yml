@@ -1,0 +1,179 @@
+name: putitoutthere matrix
+
+# Internal reusable workflow: plan + build jobs.
+#
+# Consumer-facing workflows (`release.yml`, `build.yml`) call this
+# workflow as `uses: thekevinscott/putitoutthere/.github/workflows/_matrix.yml@v0`
+# so the plan + build steps live in exactly one place. release.yml then
+# adds its own `publish` job that consumes the matrix + has_pypi outputs;
+# build.yml stops here. Single source of truth — every action pin, every
+# `if:` guard on `matrix.kind` / `matrix.build` / `matrix.target`, every
+# shell snippet — only exists in this file.
+#
+# Permissions: contents: read only. No `id-token: write`. The build path
+# must never grow publish-capable bytes — see issue #272 design notes.
+# A grep assertion in `actionlint.yml` guards against drift.
+#
+# Concurrency: callers own the concurrency group. release.yml uses a
+# repository-keyed group with cancel-in-progress: false; build.yml uses
+# a ref-keyed group with cancel-in-progress: true. Declaring concurrency
+# here would double-gate runs.
+#
+# The `uses: thekevinscott/putitoutthere@v0` call below resolves to the
+# same git ref the workflow itself was loaded from, matching the
+# contract release.yml documents in its own header.
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: >-
+          Node version for plan / publish runners and for kind = "npm"
+          build steps. Default `24`.
+        type: string
+        default: '24'
+      python_version:
+        description: >-
+          Python version for kind = "pypi" build steps. Default `3.12`.
+        type: string
+        default: '3.12'
+    outputs:
+      matrix:
+        description: >-
+          The plan matrix as a JSON string. Empty matrices serialize to
+          `'[]'`. Consumers (`release.yml`'s publish job) parse this
+          via `fromJSON()` and gate downstream jobs on non-empty.
+        value: ${{ jobs.plan.outputs.matrix }}
+      has_pypi:
+        description: >-
+          `'true'` when the planned matrix contains any pypi rows, else
+          `'false'`. release.yml re-exposes this as its own workflow_call
+          output so consumers can gate their caller-side `pypi-publish`
+          job; build.yml does not (pass/fail gate, no caller jobs).
+        value: ${{ jobs.plan.outputs.has_pypi }}
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      has_pypi: ${{ steps.has-pypi.outputs.has_pypi }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - id: plan
+        uses: thekevinscott/putitoutthere@v0
+        with:
+          command: plan
+
+      # Compute a boolean "has_pypi" the consumer can gate their
+      # caller-side pypi-publish job on. PyPI uploads run in the
+      # caller's workflow context (not this reusable workflow) per
+      # the warehouse#11096 architectural constraint — see
+      # notes/audits/2026-04-28-pypi-tp-reusable-workflow-constraint.md.
+      - id: has-pypi
+        env:
+          MATRIX: ${{ steps.plan.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          # Bash-safe substring check; the matrix is a JSON array of
+          # objects each carrying a `kind` field.
+          if printf '%s' "${MATRIX:-}" | grep -q '"kind":"pypi"'; then
+            echo "has_pypi=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_pypi=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: plan
+    if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runs_on }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # ---- pypi ----
+      - if: matrix.kind == 'pypi'
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      # Two invocations: `maturin build --sdist` produces wheel AND sdist
+      # (the flag is "also build sdist", not "only build sdist"), so the
+      # sdist row would emit a wheel artifact that collides with the
+      # per-target wheel rows at upload time. Use `command: sdist` for
+      # the sdist row, which produces sdist-only.
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target == 'sdist'
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ${{ matrix.path }}
+          command: sdist
+          args: --out dist
+
+      - if: matrix.kind == 'pypi' && matrix.build == 'maturin' && matrix.target != 'sdist'
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ${{ matrix.path }}
+          command: build
+          args: --release --out dist --target ${{ matrix.target }}
+
+      - if: matrix.kind == 'pypi' && matrix.build != 'maturin' && matrix.target == 'sdist'
+        # hatch-vcs / setuptools-scm derive the version from the latest git
+        # tag at build time — which is still the *previous* release at this
+        # point. Feed the planned version through setuptools-scm's global
+        # pretend-version env so the sdist filename matches what we're about
+        # to publish. Per-package variants are silently ignored by hatch-vcs;
+        # only the global one works.
+        working-directory: ${{ matrix.path }}
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ matrix.version }}
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --sdist --outdir dist
+
+      # ---- npm ----
+      - if: matrix.kind == 'npm'
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node_version }}
+          registry-url: 'https://registry.npmjs.org'
+
+      - if: matrix.kind == 'npm'
+        working-directory: ${{ matrix.path }}
+        # Build matrix can target Windows runners; default shell there is
+        # pwsh, but `if [ -f ... ]` is bash. Force bash for portability.
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f pnpm-lock.yaml ]; then
+            npm install -g pnpm@9
+            pnpm install --frozen-lockfile
+          else
+            npm install
+          fi
+          npm run build --if-present
+
+      # ---- crates ----
+      # cargo publish builds on the registry side; no artifact needed
+      # at build time. The publish job invokes cargo directly.
+
+      - if: matrix.kind != 'crates'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_path }}

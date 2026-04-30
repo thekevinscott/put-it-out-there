@@ -1,0 +1,59 @@
+name: putitoutthere build
+
+# Reusable workflow for PR-time build verification.
+#
+# Consumer integration (their own .github/workflows/build-check.yml):
+#
+#   on:
+#     pull_request: {}
+#
+#   jobs:
+#     build-check:
+#       uses: thekevinscott/putitoutthere/.github/workflows/build.yml@v0
+#
+# Same plan + build matrix as `release.yml` runs, called via the same
+# `_matrix.yml` reusable workflow. Stops there: there is no publish
+# job, no `id-token: write` permission, no OIDC trusted-publisher
+# exchange, no registry auth. The bytes required to publish do not
+# exist on this code path. That structural guarantee — not a
+# `dry_run: true` runtime flag — is what makes this safe to run on
+# untrusted PRs.
+#
+# Permissions: contents: read only. A grep assertion in
+# `actionlint.yml` rejects any future patch that adds `id-token: write`
+# to this file or to `_matrix.yml`. See issue #272 for the
+# safety reasoning.
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: >-
+          Node version for plan runners and for kind = "npm" build
+          steps. Default `24`. Forwarded to `_matrix.yml`.
+        type: string
+        default: '24'
+      python_version:
+        description: >-
+          Python version for kind = "pypi" build steps. Default `3.12`.
+          Forwarded to `_matrix.yml`.
+        type: string
+        default: '3.12'
+
+# Ref-keyed group with cancel-in-progress: a new push on the same PR
+# branch supersedes the in-flight build-check run. Releases (`release.yml`)
+# use a repository-keyed group with cancel-in-progress: false, so PR
+# build-checks and release runs never contend for the same slot.
+concurrency:
+  group: putitoutthere-build-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: thekevinscott/putitoutthere/.github/workflows/_matrix.yml@v0
+    with:
+      node_version: ${{ inputs.node_version }}
+      python_version: ${{ inputs.python_version }}

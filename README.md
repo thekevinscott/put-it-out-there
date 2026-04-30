@@ -69,6 +69,31 @@ Optional inputs — `with:` block at the call site:
 | `node_version`   | `24`         | You need a specific Node version for `kind = "npm"` build steps.         |
 | `python_version` | `3.12`       | You need a specific Python version for `kind = "pypi"` build steps.      |
 
+### 1b. Optional: drop in `.github/workflows/build-check.yml`
+
+Run the same plan + build matrix on every PR, with the publish step
+structurally absent:
+
+```yaml
+name: Build check
+
+on:
+  pull_request: {}
+
+jobs:
+  build-check:
+    uses: thekevinscott/putitoutthere/.github/workflows/build.yml@v0
+```
+
+`build.yml` calls the same internal `_matrix.yml` reusable workflow that
+`release.yml` does — same action pins, same per-target build steps, same
+runners — so a PR that breaks `aarch64-apple-darwin` wheels surfaces
+in review instead of at release time. The publish job, the
+`id-token: write` permission, and the OIDC trusted-publisher exchanges
+do not exist on this code path; there is no flag, no input, no
+conditional that could ever cause it to publish. Same `node_version` /
+`python_version` inputs as `release.yml`; no new config to write.
+
 ### 2. Drop in `putitoutthere.toml`
 
 ```toml
