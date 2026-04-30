@@ -116,13 +116,25 @@ describe('#246 workflow YAML invariants', () => {
   // empty-plan reason) from running publish to a non-zero exit. Lock the
   // gate's presence in so a future edit can't quietly delete it and turn
   // every skip-trailer commit into a red release run.
+  //
+  // The gate's `needs.<job>.outputs.matrix` reference depends on which
+  // job exposes the matrix in the file under test:
+  // - `release.yml` delegates plan + build to `_matrix.yml`; the publish
+  //   job reads `needs.build.outputs.matrix` from the reusable-workflow
+  //   caller.
+  // - `release-npm.yml` keeps an inline plan job; the publish job reads
+  //   `needs.plan.outputs.matrix`.
   it.each([
-    '.github/workflows/release.yml',
-    '.github/workflows/release-npm.yml',
-  ])('%s gates the publish job on a non-empty matrix from the plan job', (path) => {
-    const text = readFileSync(join(repoRoot, path), 'utf8');
-    expect(text).toContain(
+    [
+      '.github/workflows/release.yml',
+      "if: fromJSON(needs.build.outputs.matrix || '[]')[0] != null",
+    ],
+    [
+      '.github/workflows/release-npm.yml',
       "if: fromJSON(needs.plan.outputs.matrix || '[]')[0] != null",
-    );
+    ],
+  ])('%s gates the publish job on a non-empty matrix', (path, gate) => {
+    const text = readFileSync(join(repoRoot, path), 'utf8');
+    expect(text).toContain(gate);
   });
 });
