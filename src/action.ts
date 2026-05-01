@@ -13,6 +13,7 @@ import { run } from './cli.js';
 export async function main(): Promise<void> {
   const command = process.env.INPUT_COMMAND ?? '';
   const workingDirectory = process.env.INPUT_WORKING_DIRECTORY ?? '';
+  const versionInput = process.env.INPUT_VERSION ?? '';
   const failOnError =
     (process.env.INPUT_FAIL_ON_ERROR ?? 'true').toLowerCase() !== 'false';
 
@@ -23,8 +24,18 @@ export async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const argv = ['node', 'putitoutthere', command, '--json'];
-  if (workingDirectory) argv.push('--cwd', workingDirectory);
+  // #276: write-version uses a different argv shape — `--path` (the
+  // package dir, sourced from `working_directory`) and `--version`.
+  // No `--json`: the subcommand emits a single human line; there's
+  // no structured output to consume.
+  const argv = ['node', 'putitoutthere', command];
+  if (command === 'write-version') {
+    if (workingDirectory) argv.push('--path', workingDirectory);
+    if (versionInput) argv.push('--version', versionInput);
+  } else {
+    argv.push('--json');
+    if (workingDirectory) argv.push('--cwd', workingDirectory);
+  }
 
   const code = await run(argv);
   if (code !== 0 && !failOnError) {
