@@ -18,13 +18,17 @@ export async function main(): Promise<void> {
     (process.env.INPUT_FAIL_ON_ERROR ?? 'true').toLowerCase() !== 'false';
 
   // TEMPORARY DIAGNOSTIC (#276): on Windows runners write-version
-  // exits 0 but neither pyproject nor Cargo gets bumped. Surface the
-  // env-var values the action received as a workflow warning so we
-  // can see what dispatched without spelunking collapsed step logs.
-  // Strip once Windows-specific failure mode is fixed.
+  // exits 0 but neither pyproject nor Cargo gets bumped. Emit the
+  // env-var values the action received as a workflow ERROR (not a
+  // warning) so the values surface as a check-run annotation
+  // visible in the PR summary even when step logs are collapsed.
+  // Counterintuitively this errors only on the diagnostic line —
+  // write-version still runs after; we emit the annotation but
+  // continue to dispatch normally. Strip once Windows-specific
+  // failure mode is fixed.
   if (command === 'write-version') {
     process.stdout.write(
-      `::warning title=piot-action diag #276::command='${command}' workingDirectory='${workingDirectory}' version='${versionInput}' platform='${process.platform}' cwd='${process.cwd()}'\n`,
+      `::error title=piot-action diag #276::command='${command}' workingDirectory='${workingDirectory}' version='${versionInput}' platform='${process.platform}' cwd='${process.cwd()}'\n`,
     );
   }
 
