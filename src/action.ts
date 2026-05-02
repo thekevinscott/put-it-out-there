@@ -8,6 +8,8 @@
  * Issue #24. Plan: §5.2, §5.3.
  */
 
+import { pathToFileURL } from 'node:url';
+
 import { run } from './cli.js';
 
 export async function main(): Promise<void> {
@@ -16,21 +18,6 @@ export async function main(): Promise<void> {
   const versionInput = process.env.INPUT_VERSION ?? '';
   const failOnError =
     (process.env.INPUT_FAIL_ON_ERROR ?? 'true').toLowerCase() !== 'false';
-
-  // TEMPORARY DIAGNOSTIC (#276): on Windows runners write-version
-  // exits 0 but neither pyproject nor Cargo gets bumped. Emit the
-  // env-var values the action received as a workflow ERROR (not a
-  // warning) so the values surface as a check-run annotation
-  // visible in the PR summary even when step logs are collapsed.
-  // Counterintuitively this errors only on the diagnostic line —
-  // write-version still runs after; we emit the annotation but
-  // continue to dispatch normally. Strip once Windows-specific
-  // failure mode is fixed.
-  if (command === 'write-version') {
-    process.stdout.write(
-      `::error title=piot-action diag #276::command='${command}' workingDirectory='${workingDirectory}' version='${versionInput}' platform='${process.platform}' cwd='${process.cwd()}'\n`,
-    );
-  }
 
   if (!command) {
     process.stderr.write(
@@ -62,7 +49,17 @@ export async function main(): Promise<void> {
   process.exit(code);
 }
 
+// Entry-point guard. Compare via `pathToFileURL` so the guard fires on
+// Windows too: `import.meta.url` is a `file://` URL with forward
+// slashes (`file:///D:/.../index.js`), while `process.argv[1]` is the
+// native path (`D:\...\index.js`). Concatenating `file://` to the
+// native path produces a string that never equals the URL on Windows,
+// so the previous guard silently no-op'd the entire action when ncc-
+// bundled and invoked via `uses: ./` on a windows-latest runner —
+// `main()` was never called, the action exited 0 immediately, and
+// `_matrix.yml`'s pre-maturin write-version step bumped nothing
+// (PR #277, e2e Windows maturin failures). Issue #276.
 /* v8 ignore next 3 -- entry-point guard; only reachable when invoked as a binary */
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   void main();
 }
